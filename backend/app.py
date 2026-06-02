@@ -126,10 +126,11 @@ def test_connect():
 @socketio.on('disconnect')
 def test_disconnect():
     print('Client disconnected')
-
+    
 if __name__ == '__main__':
     # Start background thread
     socketio.start_background_task(data_background_thread)
+
     # Run server
-    print("Starting Flask-SocketIO server on port 5000...")
-    socketio.run(app, debug=True, port=5000, allow_unsafe_werkzeug=True)
+    print("Starting Flask-SocketIO server on port 5050...")
+    socketio.run(app, debug=True, port=5050, allow_unsafe_werkzeug=True, use_reloader=False)

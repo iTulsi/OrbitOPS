@@ -15,7 +15,7 @@ import Launches from './pages/Launches';
 import Home from './pages/Home';
 
 // Socket connection
-const socket = io('http://localhost:5000');
+const socket = io('http://localhost:5050');
 
 function App() {
     const [orbitData, setOrbitData] = useState({
@@ -51,7 +51,7 @@ function App() {
 
     const handleRefresh = () => {
         // Allow manual refresh if needed, though socket pushes automatically
-        fetch('http://localhost:5000/api/debris')
+        fetch('http://localhost:5050/api/debris')
             .then(res => res.json())
             .then(data => {
                 if (data.objects) setOrbitData(data);

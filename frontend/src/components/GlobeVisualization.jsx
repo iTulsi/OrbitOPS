@@ -118,7 +118,7 @@ const GlobeVisualization = () => {
         // Poll for positions (in a real app, use websockets or 1s intervals)
         const fetchData = async () => {
             try {
-                const res = await fetch('http://localhost:5000/api/debris');
+                const res = await fetch('http://localhost:5050/api/debris');
                 const json = await res.json();
                 setDebrisData(json.objects || []);
             } catch (e) {
