@@ -1,0 +1,18 @@
+# Node / React
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+
+# Python
+venv/
+backend/venv/
+__pycache__/
+*.pyc
+
+# Mac
+.DS_Store
+
+# Environment / secrets
+.env
+*.env

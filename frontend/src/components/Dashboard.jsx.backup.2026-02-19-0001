@@ -1,0 +1,49 @@
+import React from 'react'
+import { motion } from 'framer-motion'
+import GlobeVisualization from './GlobeVisualization'
+import { Globe, Satellite, AlertTriangle, Activity } from 'lucide-react'
+
+// Minimal, single-definition Dashboard component to avoid duplication issues.
+export default function Dashboard({ data = [], stats = {}, onRefresh = () => {}, lastUpdated = 0 }) {
+  const total = (data && data.length) || stats?.total_objects || 0
+  const active = (data && data.filter?.(d => d.type === 'SATELLITE').length) || stats?.classification?.active_satellites || 0
+  const debris = (data && data.filter?.(d => d.type === 'DEBRIS' || d.type === 'ROCKET_BODY').length) || stats?.classification?.debris || 0
+
+  return (
+    <div className="w-full min-h-screen space-bg text-white">
+      <header className="px-8 pt-8 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-orbitron neon-text-cyan">OrbitOPS</h1>
+          <p className="text-xs text-gray-300">Live Space Activity</p>
+        </div>
+        <div className="flex gap-3">
+          <button onClick={() => (window.location.href = '/visualization')} className="px-3 py-1 bg-neon-cyan/20 rounded">3D Live Visualization</button>
+          <button onClick={onRefresh} className="px-3 py-1 bg-white/5 rounded">Refresh</button>
+        </div>
+      </header>
+
+      <main className="p-8 grid lg:grid-cols-3 gap-6">
+        <section className="lg:col-span-2 h-[560px] bg-transparent rounded-lg glass-panel overflow-hidden">
+          <GlobeVisualization />
+        </section>
+
+        <aside className="space-y-4">
+          <div className="glass-card p-4">
+            <div className="text-sm text-gray-300">Total objects</div>
+            <div className="text-2xl font-bold">{total.toLocaleString()}</div>
+          </div>
+          <div className="glass-card p-4">
+            <div className="text-sm text-gray-300">Active satellites</div>
+            <div className="text-xl">{active.toLocaleString()}</div>
+          </div>
+          <div className="glass-card p-4">
+            <div className="text-sm text-gray-300">Debris</div>
+            <div className="text-xl">{debris.toLocaleString()}</div>
+          </div>
+        </aside>
+      </main>
+
+      <footer className="px-8 pb-8 text-xs text-gray-400">Last update: {lastUpdated ? new Date(lastUpdated * 1000).toLocaleString() : '—'}</footer>
+    </div>
+  )
+}

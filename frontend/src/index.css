@@ -1,0 +1,172 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  .glass-panel {
+    @apply bg-space-light/60 backdrop-blur-xl border border-white/10 shadow-2xl;
+  }
+  
+  .glass-card {
+    @apply bg-space-light/40 backdrop-blur-lg border border-white/10 shadow-lg rounded-xl;
+  }
+  
+  .neon-text-cyan {
+    text-shadow: 0 0 10px rgba(0, 255, 255, 0.7);
+  }
+  
+  .neon-border-cyan {
+    box-shadow: 0 0 10px rgba(0, 255, 255, 0.3);
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #0a0a1a; 
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #1a1a2e; 
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #00ffff; 
+  }
+
+  /* Stat card animations */
+  .stat-card {
+    @apply transition-all duration-300 hover:scale-105 hover:shadow-lg;
+  }
+
+  /* Glow animation */
+  @keyframes glow-pulse {
+    0%, 100% { box-shadow: 0 0 5px currentColor; }
+    50% { box-shadow: 0 0 20px currentColor; }
+  }
+  .glow-pulse {
+    animation: glow-pulse 2s ease-in-out infinite;
+  }
+
+  /* Data row animation */
+  @keyframes slide-in {
+    from {
+      opacity: 0;
+      transform: translateY(-10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  .data-row {
+    animation: slide-in 0.3s ease-out;
+  }
+
+  /* Refresh spin */
+  @keyframes refresh-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+  .refresh-spin {
+    animation: refresh-spin 1s linear infinite;
+  }
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: #0a0a1a;
+  color: #eeeeee;
+  font-family: 'Inter', sans-serif;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Orbitron', sans-serif;
+}
+
+/* Deep space gradient + animated stars */
+.space-bg {
+  background: radial-gradient(1200px circle at 20% 20%, #0b1b3a 0%, transparent 25%), linear-gradient(180deg, #07102a 0%, #2b0347 60%);
+  position: relative;
+  overflow: hidden;
+}
+
+.space-bg:before,
+.space-bg:after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-repeat: repeat;
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.space-bg:before {
+  background-image: radial-gradient(2px 2px at 10% 20%, rgba(255,255,255,0.9) 0%, transparent 30%), radial-gradient(1.5px 1.5px at 40% 60%, rgba(255,255,255,0.8) 0%, transparent 30%);
+  background-size: 50px 50px;
+  animation: starDrift 40s linear infinite;
+}
+
+.space-bg:after {
+  background-image: radial-gradient(1px 1px at 20% 30%, rgba(200,220,255,0.07) 0%, transparent 40%);
+  background-size: 120px 120px;
+  animation: starTwinkle 6s linear infinite;
+}
+
+@keyframes starDrift {
+  from { transform: translateY(0px); }
+  to { transform: translateY(-200px); }
+}
+
+@keyframes starTwinkle {
+  0% { opacity: 0.15; }
+  50% { opacity: 0.45; }
+  100% { opacity: 0.15; }
+}
+
+/* Floating / anti-gravity effect */
+@keyframes floaty {
+  0% { transform: translateY(0px); }
+  50% { transform: translateY(-8px); }
+  100% { transform: translateY(0px); }
+}
+
+.glass-panel {
+  @apply bg-[#060617]/60 backdrop-blur-xl border border-white/10 shadow-2xl;
+}
+
+.glass-card {
+  @apply bg-[#060617]/40 backdrop-blur-lg border border-white/10 shadow-lg rounded-xl;
+}
+
+/* Subtle hover lift and clarity for info cards */
+.glass-card:hover, .glass-panel:hover {
+  transform: translateY(-6px);
+  transition: transform 300ms ease, box-shadow 300ms ease;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.6), 0 0 30px rgba(0,255,255,0.04) inset;
+}
+
+/* Neon accent variables */
+:root {
+  --neon-cyan: #00f0ff;
+  --soft-purple: #b687ff;
+}
+
+.neon-text-cyan { color: var(--neon-cyan); }
+
+/* Small readability helpers */
+.glass-card ul { padding-left: 0.4rem; }
+.glass-card li { list-style: none; }
+
+/* Make counters readable and slightly larger on small screens */
+@media (max-width: 768px) {
+  .glass-card .text-2xl { font-size: 1.35rem; }
+}
+
+/* Legend style over Globe */
+.globe-legend {
+  background: linear-gradient(180deg, rgba(6,6,23,0.6), rgba(8,12,24,0.4));
+  border: 1px solid rgba(255,255,255,0.04);
+  backdrop-filter: blur(6px);
+}
