@@ -1,5 +1,6 @@
-import numpy as np
 import os
+import requests
+from flask import Flask, jsonify, send_from_directory
 
 # Monkey patch for numpy 2.0 compatibility (sgp4/skyfield fix)
 if not hasattr(np, 'float_'):
@@ -122,6 +123,86 @@ def force_fetch():
 
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
+@app.route('/api/ai/briefing', methods=['GET'])
+def ai_mission_briefing():
+    try:
+        api_key = os.environ.get("GEMINI_API_KEY")
+
+        if not api_key:
+            return jsonify({
+                "status": "error",
+                "message": "GEMINI_API_KEY is not configured on the server."
+            }), 500
+
+        objects = orbit_data.get("objects", [])
+        stats = orbit_data.get("stats", {})
+        source = orbit_data.get("source", "unknown")
+
+        if not objects:
+            return jsonify({
+                "status": "no_data",
+                "message": "No orbital data available yet. Wait a few seconds and try again."
+            }), 400
+
+        sample_objects = objects[:8]
+
+        prompt = f"""
+You are OrbitOPS AI Mission Analyst.
+
+Analyze this orbital monitoring data and generate a concise mission briefing.
+
+Data source: {source}
+
+Stats:
+{stats}
+
+Sample tracked objects:
+{sample_objects}
+
+Write in this structure:
+1. Mission Status
+2. Key Risk Observations
+3. Satellite/Debris Situation
+4. Recommended Operator Actions
+5. Final Risk Level
+
+Keep it professional, realistic, and understandable.
+"""
+
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": prompt}
+                    ]
+                }
+            ]
+        }
+
+        response = requests.post(url, json=payload, timeout=60)
+        response.raise_for_status()
+        result = response.json()
+
+        text = (
+            result.get("candidates", [{}])[0]
+            .get("content", {})
+            .get("parts", [{}])[0]
+            .get("text", "")
+        )
+
+        return jsonify({
+            "status": "ok",
+            "model": "gemini-2.0-flash",
+            "briefing": text
+        })
+
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
 def serve_frontend(path):
     # Let API routes stay API routes
     if path.startswith('api/'):
@@ -134,6 +215,18 @@ def serve_frontend(path):
 
     # React Router fallback for /dashboard, /visualization, etc.
     return send_from_directory(app.static_folder, 'index.html')
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve_frontend(path):
+    if path.startswith('api/'):
+        return jsonify({"error": "API route not found"}), 404
+
+    file_path = os.path.join(app.static_folder, path)
+
+    if path and os.path.exists(file_path):
+        return send_from_directory(app.static_folder, path)
+
+    return send_from_directory(app.static_folder, 'index.html')
 
 @socketio.on('connect')
 def test_connect():
@@ -145,9 +238,16 @@ def test_disconnect():
     print('Client disconnected')
     
 if __name__ == '__main__':
-    # Start background thread
     socketio.start_background_task(data_background_thread)
 
-    # Run server
-    print("Starting Flask-SocketIO server on port 5050...")
-    socketio.run(app, debug=True, port=5050, allow_unsafe_werkzeug=True, use_reloader=False)
+    port = int(os.environ.get("PORT", 5050))
+    print(f"Starting Flask-SocketIO server on port {port}...")
+
+    socketio.run(
+        app,
+        host="0.0.0.0",
+        port=port,
+        debug=False,
+        allow_unsafe_werkzeug=True,
+        use_reloader=False
+    )
