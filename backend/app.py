@@ -1,17 +1,19 @@
 import numpy as np
+import os
 
 # Monkey patch for numpy 2.0 compatibility (sgp4/skyfield fix)
 if not hasattr(np, 'float_'):
     np.float_ = np.float64
 
-from flask import Flask, jsonify
+from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 from tle_parser import get_orbital_data
 import time
 import threading
 
-app = Flask(__name__)
+dist_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'frontend', 'dist'))
+app = Flask(__name__, static_folder=dist_dir, static_url_path='')
 app.config['SECRET_KEY'] = 'secret!'
 CORS(app, resources={r"/*": {"origins": "*"}})
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
@@ -117,6 +119,21 @@ def force_fetch():
         return jsonify({"status": "error", "message": str(e)}), 500
 
     return jsonify({"status": "no_data"}), 204
+
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve_frontend(path):
+    # Let API routes stay API routes
+    if path.startswith('api/'):
+        return jsonify({"error": "API route not found"}), 404
+
+    # Serve real static files like JS/CSS/assets
+    file_path = os.path.join(app.static_folder, path)
+    if path and os.path.exists(file_path):
+        return send_from_directory(app.static_folder, path)
+
+    # React Router fallback for /dashboard, /visualization, etc.
+    return send_from_directory(app.static_folder, 'index.html')
 
 @socketio.on('connect')
 def test_connect():
