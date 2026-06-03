@@ -127,14 +127,10 @@ def force_fetch():
 
 @app.route("/api/ai/briefing", methods=["GET"])
 def ai_mission_briefing():
+    @app.route("/api/ai/briefing", methods=["GET"])
+def ai_mission_briefing():
     try:
         api_key = os.environ.get("GEMINI_API_KEY")
-
-        if not api_key:
-            return jsonify({
-                "status": "error",
-                "message": "GEMINI_API_KEY is not configured on the server."
-            }), 500
 
         if not orbit_data["objects"]:
             update_orbit_data()
@@ -142,8 +138,101 @@ def ai_mission_briefing():
         objects = orbit_data.get("objects", [])
         stats = orbit_data.get("stats", {})
         source = orbit_data.get("source", "unknown")
-        sample_objects = objects[:8]
+        sample_objects = objects[:5]
 
+        fallback_briefing = f"""
+1. Mission Status
+OrbitOPS is currently monitoring orbital objects using the {source} data pipeline.
+
+2. Key Risk Observations
+The system is tracking {stats.get("total_objects", len(objects))} orbital objects. Debris and rocket body density should be reviewed continuously because these objects can increase collision risk in crowded orbital zones.
+
+3. Satellite/Debris Situation
+Active satellites, debris, and rocket bodies are being classified and streamed to the dashboard in real time. The current system risk level is {stats.get("risk_level", "HIGH")}.
+
+4. Recommended Operator Actions
+Operators should review high-risk objects, monitor debris-heavy regions, refresh live data periodically, and inspect unusual altitude or velocity patterns.
+
+5. Final Risk Level
+Final risk level: {stats.get("risk_level", "HIGH")}.
+"""
+
+        if not api_key:
+            return jsonify({
+                "status": "fallback",
+                "model": "local-rule-based-fallback",
+                "briefing": fallback_briefing,
+                "message": "GEMINI_API_KEY is not configured, so fallback briefing was generated."
+            })
+
+        prompt = f"""
+You are OrbitOPS AI Mission Analyst.
+
+Analyze this orbital monitoring data and generate a concise mission briefing.
+
+Data source: {source}
+
+Stats:
+{stats}
+
+Sample tracked objects:
+{sample_objects}
+
+Write in this structure:
+1. Mission Status
+2. Key Risk Observations
+3. Satellite/Debris Situation
+4. Recommended Operator Actions
+5. Final Risk Level
+
+Keep it professional, realistic, and understandable.
+"""
+
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": prompt}
+                    ]
+                }
+            ]
+        }
+
+        response = requests.post(url, json=payload, timeout=60)
+
+        if response.status_code == 429:
+            return jsonify({
+                "status": "fallback",
+                "model": "quota-safe-fallback",
+                "briefing": fallback_briefing,
+                "message": "Gemini free-tier quota/rate limit was reached. Showing fallback briefing."
+            })
+
+        response.raise_for_status()
+        result = response.json()
+
+        text = (
+            result.get("candidates", [{}])[0]
+            .get("content", {})
+            .get("parts", [{}])[0]
+            .get("text", "")
+        )
+
+        return jsonify({
+            "status": "ok",
+            "model": "gemini-2.0-flash",
+            "briefing": text
+        })
+
+    except Exception:
+        return jsonify({
+            "status": "fallback",
+            "model": "safe-error-fallback",
+            "briefing": "OrbitOPS AI Briefing is temporarily unavailable. The system is still tracking orbital objects and monitoring mission risk indicators.",
+            "message": "AI briefing failed safely without exposing server secrets."
+        })
         prompt = f"""
 You are OrbitOPS AI Mission Analyst.
 
