@@ -1,8 +1,9 @@
 import os
+import time
 import requests
-from flask import Flask, jsonify, send_from_directory
+import numpy as np
 
-# Monkey patch for numpy 2.0 compatibility (sgp4/skyfield fix)
+# Monkey patch for numpy 2.0 compatibility
 if not hasattr(np, 'float_'):
     np.float_ = np.float64
 
@@ -10,12 +11,13 @@ from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 from tle_parser import get_orbital_data
-import time
-import threading
 
+# Serve React production build from frontend/dist
 dist_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'frontend', 'dist'))
+
 app = Flask(__name__, static_folder=dist_dir, static_url_path='')
 app.config['SECRET_KEY'] = 'secret!'
+
 CORS(app, resources={r"/*": {"origins": "*"}})
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
@@ -27,103 +29,103 @@ orbit_data = {
     "source": "mock"
 }
 
+
+def update_orbit_data():
+    """Fetch orbital data and update global state."""
+    result = get_orbital_data()
+
+    if result and isinstance(result, dict):
+        objs = result.get("objects", [])
+        source = result.get("source", "mock")
+        current_time = time.time()
+
+        total = len(objs)
+        debris = sum(1 for x in objs if x.get("type") == "DEBRIS")
+        active = sum(1 for x in objs if x.get("type") == "SATELLITE")
+        rockets = sum(1 for x in objs if x.get("type") == "ROCKET_BODY")
+
+        orbit_data["objects"] = objs
+        orbit_data["last_updated"] = current_time
+        orbit_data["source"] = source
+        orbit_data["stats"] = {
+            "total_objects": total,
+            "classification": {
+                "active_satellites": active,
+                "debris": debris,
+                "rocket_bodies": rockets
+            },
+            "risk_level": "CRITICAL" if debris > 12000 else "HIGH"
+        }
+
+        socketio.emit("orbital_data", orbit_data)
+
+    return orbit_data
+
+
 def data_background_thread():
-    """Background thread to update and broadcast orbital data every 3 seconds."""
+    """Background thread to update and broadcast orbital data."""
     print("Background data thread started...")
+
     while True:
         try:
-            # Fetch and propagate
-            result = get_orbital_data()
-            if result and isinstance(result, dict):
-                objs = result.get('objects', [])
-                source = result.get('source', 'mock')
-
-                current_time = time.time()
-
-                # Calculate stats
-                total = len(objs)
-                debris = sum(1 for x in objs if x.get('type') == 'DEBRIS')
-                active = sum(1 for x in objs if x.get('type') == 'SATELLITE')
-                rockets = sum(1 for x in objs if x.get('type') == 'ROCKET_BODY')
-
-                orbit_data["objects"] = objs
-                orbit_data["last_updated"] = current_time
-                orbit_data["source"] = source
-                orbit_data["stats"] = {
-                    "total_objects": total,
-                    "classification": {
-                        "active_satellites": active,
-                        "debris": debris,
-                        "rocket_bodies": rockets
-                    },
-                    "risk_level": "CRITICAL" if debris > 12000 else "HIGH"
-                }
-
-                # Broadcast to all connected clients
-                socketio.emit('orbital_data', orbit_data)
-            
+            update_orbit_data()
         except Exception as e:
             print(f"Error in background thread: {e}")
-            
-        socketio.sleep(3) # Non-blocking sleep
 
-@app.route('/api/health', methods=['GET'])
+        # 30 seconds is better for deployment than 3 seconds
+        socketio.sleep(30)
+
+
+@app.route("/api/health", methods=["GET"])
 def health_check():
-    return jsonify({"status": "healthy", "system": "OrbitOPS V2 Real-time"})
+    return jsonify({
+        "status": "healthy",
+        "system": "OrbitOPS V2 Real-time"
+    })
 
-@app.route('/api/debris', methods=['GET'])
+
+@app.route("/api/debris", methods=["GET"])
 def get_debris():
-    # Fallback for REST API (initial load)
-    return jsonify(orbit_data if orbit_data["objects"] else {"status": "initializing"})
-
-@app.route('/api/stats', methods=['GET'])
-def get_stats():
-    return jsonify(orbit_data["stats"] if orbit_data["stats"] else {"status": "initializing"})
-
-
-@app.route('/api/force_fetch', methods=['POST', 'GET'])
-def force_fetch():
-    """Force an immediate fetch from CelestTrak and return the updated source/status."""
     try:
-        result = get_orbital_data()
-        if result and isinstance(result, dict):
-            objs = result.get('objects', [])
-            source = result.get('source', 'mock')
-            current_time = time.time()
+        if not orbit_data["objects"]:
+            update_orbit_data()
 
-            orbit_data["objects"] = objs
-            orbit_data["last_updated"] = current_time
-            orbit_data["source"] = source
+        return jsonify(orbit_data)
 
-            # Recompute stats quickly
-            total = len(objs)
-            debris = sum(1 for x in objs if x.get('type') == 'DEBRIS')
-            active = sum(1 for x in objs if x.get('type') == 'SATELLITE')
-            rockets = sum(1 for x in objs if x.get('type') == 'ROCKET_BODY')
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
 
-            orbit_data["stats"] = {
-                "total_objects": total,
-                "classification": {
-                    "active_satellites": active,
-                    "debris": debris,
-                    "rocket_bodies": rockets
-                },
-                "risk_level": "CRITICAL" if debris > 12000 else "HIGH"
-            }
 
-            # Broadcast new data
-            socketio.emit('orbital_data', orbit_data)
+@app.route("/api/stats", methods=["GET"])
+def get_stats():
+    if not orbit_data["stats"]:
+        return jsonify({"status": "initializing"})
 
-            return jsonify({"status": "ok", "source": source, "objects": len(objs)})
+    return jsonify(orbit_data["stats"])
+
+
+@app.route("/api/force_fetch", methods=["POST", "GET"])
+def force_fetch():
+    try:
+        update_orbit_data()
+        return jsonify({
+            "status": "ok",
+            "source": orbit_data["source"],
+            "objects": len(orbit_data["objects"])
+        })
+
     except Exception as e:
         print(f"Force fetch error: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
 
-    return jsonify({"status": "no_data"}), 204
 
-@app.route('/', defaults={'path': ''})
-@app.route('/<path:path>')
-@app.route('/api/ai/briefing', methods=['GET'])
+@app.route("/api/ai/briefing", methods=["GET"])
 def ai_mission_briefing():
     try:
         api_key = os.environ.get("GEMINI_API_KEY")
@@ -134,16 +136,12 @@ def ai_mission_briefing():
                 "message": "GEMINI_API_KEY is not configured on the server."
             }), 500
 
+        if not orbit_data["objects"]:
+            update_orbit_data()
+
         objects = orbit_data.get("objects", [])
         stats = orbit_data.get("stats", {})
         source = orbit_data.get("source", "unknown")
-
-        if not objects:
-            return jsonify({
-                "status": "no_data",
-                "message": "No orbital data available yet. Wait a few seconds and try again."
-            }), 400
-
         sample_objects = objects[:8]
 
         prompt = f"""
@@ -203,41 +201,38 @@ Keep it professional, realistic, and understandable.
             "status": "error",
             "message": str(e)
         }), 500
-def serve_frontend(path):
-    # Let API routes stay API routes
-    if path.startswith('api/'):
-        return jsonify({"error": "API route not found"}), 404
 
-    # Serve real static files like JS/CSS/assets
-    file_path = os.path.join(app.static_folder, path)
-    if path and os.path.exists(file_path):
-        return send_from_directory(app.static_folder, path)
 
-    # React Router fallback for /dashboard, /visualization, etc.
-    return send_from_directory(app.static_folder, 'index.html')
-@app.route('/', defaults={'path': ''})
-@app.route('/<path:path>')
-def serve_frontend(path):
-    if path.startswith('api/'):
-        return jsonify({"error": "API route not found"}), 404
-
-    file_path = os.path.join(app.static_folder, path)
-
-    if path and os.path.exists(file_path):
-        return send_from_directory(app.static_folder, path)
-
-    return send_from_directory(app.static_folder, 'index.html')
-
-@socketio.on('connect')
+@socketio.on("connect")
 def test_connect():
-    print('Client connected to socket')
-    emit('connection_response', {'data': 'Connected to OrbitOPS Data Stream'})
+    print("Client connected to socket")
+    emit("connection_response", {"data": "Connected to OrbitOPS Data Stream"})
 
-@socketio.on('disconnect')
+    if orbit_data["objects"]:
+        emit("orbital_data", orbit_data)
+
+
+@socketio.on("disconnect")
 def test_disconnect():
-    print('Client disconnected')
-    
-if __name__ == '__main__':
+    print("Client disconnected")
+
+
+# React frontend route - keep this AFTER all /api routes
+@app.route("/", defaults={"path": ""})
+@app.route("/<path:path>")
+def serve_frontend(path):
+    if path.startswith("api/"):
+        return jsonify({"error": "API route not found"}), 404
+
+    file_path = os.path.join(app.static_folder, path)
+
+    if path and os.path.exists(file_path):
+        return send_from_directory(app.static_folder, path)
+
+    return send_from_directory(app.static_folder, "index.html")
+
+
+if __name__ == "__main__":
     socketio.start_background_task(data_background_thread)
 
     port = int(os.environ.get("PORT", 5050))
