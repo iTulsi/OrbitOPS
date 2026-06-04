@@ -4,7 +4,7 @@ import requests
 import numpy as np
 
 # Monkey patch for numpy 2.0 compatibility
-if not hasattr(np, 'float_'):
+if not hasattr(np, "float_"):
     np.float_ = np.float64
 
 from flask import Flask, jsonify, send_from_directory
@@ -12,14 +12,18 @@ from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 from tle_parser import get_orbital_data
 
-# Serve React production build from frontend/dist
-dist_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'frontend', 'dist'))
 
-app = Flask(__name__, static_folder=dist_dir, static_url_path='')
-app.config['SECRET_KEY'] = 'secret!'
+# Serve React production build from frontend/dist
+dist_dir = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
+)
+
+app = Flask(__name__, static_folder=dist_dir, static_url_path="")
+app.config["SECRET_KEY"] = "secret!"
 
 CORS(app, resources={r"/*": {"origins": "*"}})
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+
 
 # Global state
 orbit_data = {
@@ -72,7 +76,6 @@ def data_background_thread():
         except Exception as e:
             print(f"Error in background thread: {e}")
 
-        # 30 seconds is better for deployment than 3 seconds
         socketio.sleep(30)
 
 
@@ -101,16 +104,24 @@ def get_debris():
 
 @app.route("/api/stats", methods=["GET"])
 def get_stats():
-    if not orbit_data["stats"]:
-        return jsonify({"status": "initializing"})
+    try:
+        if not orbit_data["stats"]:
+            update_orbit_data()
 
-    return jsonify(orbit_data["stats"])
+        return jsonify(orbit_data["stats"])
+
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
 
 
 @app.route("/api/force_fetch", methods=["POST", "GET"])
 def force_fetch():
     try:
         update_orbit_data()
+
         return jsonify({
             "status": "ok",
             "source": orbit_data["source"],
@@ -127,8 +138,6 @@ def force_fetch():
 
 @app.route("/api/ai/briefing", methods=["GET"])
 def ai_mission_briefing():
-    @app.route("/api/ai/briefing", methods=["GET"])
-def ai_mission_briefing():
     try:
         api_key = os.environ.get("GEMINI_API_KEY")
 
@@ -142,10 +151,10 @@ def ai_mission_briefing():
 
         fallback_briefing = f"""
 1. Mission Status
-OrbitOPS is currently monitoring orbital objects using the {source} data pipeline.
+OrbitOPS is actively monitoring orbital objects using the {source} data pipeline.
 
 2. Key Risk Observations
-The system is tracking {stats.get("total_objects", len(objects))} orbital objects. Debris and rocket body density should be reviewed continuously because these objects can increase collision risk in crowded orbital zones.
+The system is currently tracking {stats.get("total_objects", len(objects))} orbital objects. Debris and rocket body density should be reviewed continuously because unmanaged orbital objects can increase collision risk in crowded orbital zones.
 
 3. Satellite/Debris Situation
 Active satellites, debris, and rocket bodies are being classified and streamed to the dashboard in real time. The current system risk level is {stats.get("risk_level", "HIGH")}.
@@ -160,7 +169,7 @@ Final risk level: {stats.get("risk_level", "HIGH")}.
         if not api_key:
             return jsonify({
                 "status": "fallback",
-                "model": "local-rule-based-fallback",
+                "model": "rule-based-fallback",
                 "briefing": fallback_briefing,
                 "message": "GEMINI_API_KEY is not configured, so fallback briefing was generated."
             })
@@ -188,7 +197,10 @@ Write in this structure:
 Keep it professional, realistic, and understandable.
 """
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+        url = (
+            "https://generativelanguage.googleapis.com/v1beta/"
+            f"models/gemini-2.0-flash:generateContent?key={api_key}"
+        )
 
         payload = {
             "contents": [
@@ -220,6 +232,9 @@ Keep it professional, realistic, and understandable.
             .get("text", "")
         )
 
+        if not text:
+            text = fallback_briefing
+
         return jsonify({
             "status": "ok",
             "model": "gemini-2.0-flash",
@@ -233,63 +248,6 @@ Keep it professional, realistic, and understandable.
             "briefing": "OrbitOPS AI Briefing is temporarily unavailable. The system is still tracking orbital objects and monitoring mission risk indicators.",
             "message": "AI briefing failed safely without exposing server secrets."
         })
-        prompt = f"""
-You are OrbitOPS AI Mission Analyst.
-
-Analyze this orbital monitoring data and generate a concise mission briefing.
-
-Data source: {source}
-
-Stats:
-{stats}
-
-Sample tracked objects:
-{sample_objects}
-
-Write in this structure:
-1. Mission Status
-2. Key Risk Observations
-3. Satellite/Debris Situation
-4. Recommended Operator Actions
-5. Final Risk Level
-
-Keep it professional, realistic, and understandable.
-"""
-
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
-
-        payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {"text": prompt}
-                    ]
-                }
-            ]
-        }
-
-        response = requests.post(url, json=payload, timeout=60)
-        response.raise_for_status()
-        result = response.json()
-
-        text = (
-            result.get("candidates", [{}])[0]
-            .get("content", {})
-            .get("parts", [{}])[0]
-            .get("text", "")
-        )
-
-        return jsonify({
-            "status": "ok",
-            "model": "gemini-2.0-flash",
-            "briefing": text
-        })
-
-    except Exception as e:
-        return jsonify({
-            "status": "error",
-            "message": str(e)
-        }), 500
 
 
 @socketio.on("connect")
