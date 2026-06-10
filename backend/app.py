@@ -3,6 +3,7 @@ import time
 import threading
 import requests
 import numpy as np
+from risk_engine import analyze_collision_pairs
 
 # Monkey patch for numpy 2.0 compatibility
 if not hasattr(np, "float_"):
@@ -41,6 +42,18 @@ socketio = SocketIO(
     cors_allowed_origins="*",
     async_mode="threading"
 )
+@app.route("/api/collision-risk", methods=["GET"])
+def get_collision_risk():
+    objects = orbit_data.get("objects", [])
+
+    risk_pairs = analyze_collision_pairs(objects)
+
+    return jsonify({
+        "total_objects_analyzed": len(objects),
+        "risk_pairs": risk_pairs,
+        "model_type": "baseline-rule-based-risk-engine",
+        "status": "success"
+    })
 
 
 # ============================================================
