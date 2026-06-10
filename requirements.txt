@@ -1,0 +1,6 @@
+flask
+flask-cors
+flask-socketio
+requests
+numpy
+sgp4
