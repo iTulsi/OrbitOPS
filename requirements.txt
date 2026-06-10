@@ -4,3 +4,4 @@ flask-socketio
 requests
 numpy
 sgp4
+skyfield
