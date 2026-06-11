@@ -5,5 +5,5 @@ requests
 numpy
 sgp4
 skyfield
-eventlet
 gunicorn
+eventlet
