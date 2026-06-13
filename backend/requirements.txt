@@ -6,4 +6,4 @@ numpy
 sgp4
 skyfield
 gunicorn
-eventlet
+simple-websocket
