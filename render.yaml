@@ -1,8 +1,16 @@
 services:
   - type: web
     name: orbitops
-    env: python
-    plan: free
-    rootDir: .
-    buildCommand: cd frontend && npm install && npm run build && cd ../backend && python3 -m pip install -r requirements.txt
-    startCommand: cd backend && gunicorn app:app
+    runtime: docker
+
+    healthCheckPath: /api/health
+
+    envVars:
+      - key: WEB_CONCURRENCY
+        value: "1"
+
+      - key: GEMINI_API_KEY
+        sync: false
+
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
