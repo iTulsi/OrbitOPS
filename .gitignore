@@ -1,22 +1,19 @@
-# Node / React
-node_modules/
-frontend/node_modules/
-dist/
-frontend/dist/
 
-# Python
-venv/
-backend/venv/
 __pycache__/
-*.pyc
-
-# Mac
 .DS_Store
-
-# Environment / secrets
 .env
 *.env
-
+*.pyc
+# Environment / secrets
+# Mac
+# Node / React
+# OrbitOPS runtime orbital-data cache
+# Python
+backend/data/
+backend/venv/
+dist/
 frontend/.env.development
-
-frontend/.env.development
+frontend/dist/
+frontend/node_modules/
+node_modules/
+venv/
