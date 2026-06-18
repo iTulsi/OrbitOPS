@@ -654,6 +654,80 @@ def get_objects():
         return error_response(str(error))
 
 
+
+
+@app.route("/api/satellites/live", methods=["GET"])
+def get_live_satellites():
+    # Return current positions propagated from real CelesTrak elements.
+    try:
+        result = get_orbital_data()
+
+        objects = result.get("objects", [])
+        limit = request.args.get("limit", 500, type=int)
+        limit = max(1, min(limit, 2500))
+        returned_objects = objects[:limit]
+
+        return jsonify({
+            "status": "ok",
+            "count": len(returned_objects),
+            "total_available": len(objects),
+            "objects": returned_objects,
+            "source": result.get("source_name", "CelesTrak"),
+            "source_key": result.get("source", "celestrak"),
+            "source_status": result.get("source_status", "unknown"),
+            "source_format": result.get("source_format", "TLE/GP"),
+            "using_cached_elements": result.get("using_cache", False),
+            "last_successful_fetch": result.get("last_successful_fetch"),
+            "positions_generated_at": result.get("position_timestamp"),
+            "propagator": result.get("propagator", "SGP4"),
+            "data_mode": result.get("data_mode", "live-propagated")
+        })
+
+    except Exception as error:
+        return jsonify({
+            "status": "error",
+            "message": str(error)
+        }), 500
+
+
+@app.route("/api/data-status", methods=["GET"])
+def get_data_status():
+    # Report source provenance and freshness without synthetic fallback.
+    try:
+        result = get_orbital_data()
+        source_status = result.get("source_status", "unknown")
+
+        if source_status in {"live", "partial-live", "cached-fresh"}:
+            availability = "live"
+        elif source_status == "stale":
+            availability = "stale"
+        else:
+            availability = "offline"
+
+        return jsonify({
+            "status": availability,
+            "source": result.get("source_name", "CelesTrak"),
+            "source_key": result.get("source", "celestrak"),
+            "source_status": source_status,
+            "source_format": result.get("source_format", "TLE/GP"),
+            "source_groups": result.get("source_groups", []),
+            "source_errors": result.get("source_errors", []),
+            "objects": len(result.get("objects", [])),
+            "using_cached_elements": result.get("using_cache", False),
+            "last_successful_fetch": result.get("last_successful_fetch"),
+            "positions_generated_at": result.get("position_timestamp"),
+            "propagator": result.get("propagator", "SGP4"),
+            "data_mode": result.get("data_mode", "live-propagated")
+        })
+
+    except Exception as error:
+        return jsonify({
+            "status": "offline",
+            "source": "CelesTrak",
+            "message": str(error)
+        }), 503
+
+
 @app.route("/api/object/<object_id>", methods=["GET"])
 def get_single_object(object_id: str):
     try:
@@ -1012,6 +1086,8 @@ def serve_frontend(path: str):
             "/api/health",
             "/api/debris",
             "/api/objects",
+            "/api/satellites/live",
+            "/api/data-status",
             "/api/high-risk",
             "/api/risk",
             "/api/collision-risk",

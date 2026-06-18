@@ -1,171 +1,301 @@
-import requests
-from sgp4.api import Satrec, WGS72
-from skyfield.api import Topos, load, EarthSatellite
-import datetime
+from __future__ import annotations
+
+import json
+import math
+import os
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
 import numpy as np
-import random
-import concurrent.futures
+import requests
+from skyfield.api import EarthSatellite, load, wgs84
 
-# CelesTrak URLs
-TLE_URLS = [
-    "https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=tle", # Active Satellites
-    "https://celestrak.org/NORAD/elements/gp.php?GROUP=cosmos-1408-debris&FORMAT=tle", # Major debris cloud
-    "https://celestrak.org/NORAD/elements/gp.php?GROUP=iridium-33-debris&FORMAT=tle" # Another debris cloud
-]
+CELESTRAK_SOURCES = {
+    "active": "https://celestrak.org/NORAD/elements/gp.php?GROUP=ACTIVE&FORMAT=TLE",
+    "cosmos-1408-debris": (
+        "https://celestrak.org/NORAD/elements/"
+        "gp.php?GROUP=COSMOS-1408-DEBRIS&FORMAT=TLE"
+    ),
+    "iridium-33-debris": (
+        "https://celestrak.org/NORAD/elements/"
+        "gp.php?GROUP=IRIDIUM-33-DEBRIS&FORMAT=TLE"
+    ),
+}
 
-def fetch_single_url(url, retries=3, timeout=15):
-    """Fetch URL with retry logic and longer timeout."""
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-    }
-    
-    for attempt in range(retries):
-        try:
-            print(f"Connecting to {url}... (Attempt {attempt + 1}/{retries})")
-            response = requests.get(url, headers=headers, timeout=timeout)
-            response.raise_for_status()
-            print(f"Successfully fetched {url}")
-            return response.text
-        except requests.exceptions.Timeout:
-            print(f"Timeout fetching {url} (attempt {attempt + 1}/{retries}). Retrying...")
-        except requests.exceptions.ConnectionError:
-            print(f"Connection error fetching {url} (attempt {attempt + 1}/{retries}). Retrying...")
-        except Exception as e:
-            print(f"Error fetching {url}: {e}")
-            if attempt == retries - 1:
-                return ""
-    
-    return ""
+BASE_DIR = Path(__file__).resolve().parent
+DATA_DIR = BASE_DIR / "data"
+TLE_CACHE_PATH = DATA_DIR / "celestrak.tle"
+META_CACHE_PATH = DATA_DIR / "celestrak_meta.json"
 
-def fetch_tle_data():
-    """Fetches TLE data from multiple CelesTrak sources concurrently with short timeout."""
-    combined_tle = ""
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-        # Use shorter timeout and fewer retries to fail fast
-        futures = [executor.submit(fetch_single_url, url, retries=1, timeout=5) for url in TLE_URLS]
-        for future in concurrent.futures.as_completed(futures, timeout=8):
-            try:
-                res = future.result()
-                if res:
-                    combined_tle += res + "\n"
-            except Exception as e:
-                print(f"Exception in fetch: {e}")
-                continue
-    
-    return combined_tle if combined_tle.strip() else None
+SOURCE_REFRESH_SECONDS = int(os.getenv("CELESTRAK_REFRESH_SECONDS", "7200"))
+REQUEST_TIMEOUT_SECONDS = int(os.getenv("CELESTRAK_TIMEOUT_SECONDS", "20"))
+MAX_OBJECTS = int(os.getenv("ORBITOPS_MAX_OBJECTS", "2500"))
 
-def parse_and_propagate(tle_data):
-    """
-    Parses TLE data and propagates to current time.
-    Returns a list of satellite objects with position data.
-    """
-    satellites = []
-    lines = tle_data.strip().split('\n')
-    
-    ts = load.timescale()
-    t = ts.now()
-    
-    # Cleaning lines
-    lines = [l.strip() for l in lines if l.strip()]
-    
-    # Limit to prevent overload if response is massive (e.g. 20k objects might be too slow for this Python loop every 3s)
-    # 5000 is a good balance for "busy" look
-    limit = 5000
-    count = 0
+_TIMESCALE = load.timescale()
 
-    for i in range(0, len(lines), 3):
-        if i + 2 >= len(lines):
-            break
-        
-        if count >= limit:
-            break
-            
-        name = lines[i]
-        line1 = lines[i+1]
-        line2 = lines[i+2]
-        
-        try:
-            satellite = EarthSatellite(line1, line2, name, ts)
-            geocentric = satellite.at(t)
-            subpoint = geocentric.subpoint()
-            
-            lat = subpoint.latitude.degrees
-            lon = subpoint.longitude.degrees
-            alt = subpoint.elevation.km
-            
-            # Classification Logic
-            obj_type = "SATELLITE"
-            if "DEB" in name or "DEBRIS" in name: 
-                obj_type = "DEBRIS"
-            elif "R/B" in name or "ROCKET" in name:
-                obj_type = "ROCKET_BODY"
-            
-            satellites.append({
-                "id": satellite.model.satnum,
-                "name": name,
-                "lat": lat,
-                "lon": lon,
-                "alt": alt,
-                "type": obj_type,
-                "velocity": np.linalg.norm(geocentric.velocity.km_per_s)
-            })
-            count += 1
-            
-        except Exception:
-            continue
-            
-    return satellites
 
-def generate_mock_data(count=12000):
-    """Generates mock orbital data for demonstration when API fails."""
-    print(f"Generating {count} mock objects...")
-    mock_objects = []
-    
-    # Ratios based on reference image: ~33% Active, ~66% Debris
-    for i in range(count):
-        is_active = random.random() < 0.33
-        obj_type = 'SATELLITE' if is_active else random.choice(['DEBRIS', 'ROCKET_BODY'])
-        
-        # Risk factor - properly handle the logic
-        risk_rand = random.random()
-        if risk_rand < 0.01: 
-            risk_level = "HIGH"
-        elif risk_rand < 0.06: 
-            risk_level = "MEDIUM"
-        else: 
-            risk_level = "LOW"
-        
-        mock_objects.append({
-            "id": 90000 + i,
-            "name": f"{'SAT' if is_active else 'DEB'}-{i:04d}",
-            "lat": random.uniform(-80, 80),
-            "lon": random.uniform(-180, 180),
-            "alt": random.uniform(300, 2000), 
-            "type": obj_type,
-            "velocity": 7.6 + random.uniform(-0.5, 0.5),
-            "risk": risk_level,
-            "status": "ACTIVE" if is_active else "INACTIVE"
-        })
-    return mock_objects
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
-def get_orbital_data():
-    """Get orbital data - use mock data immediately, try CelestTrak and return source info."""
-    print("Fetching orbital data...")
 
-    # Start with mock data to ensure dashboard loads
-    mock_data = generate_mock_data()
+def _iso_utc(value: datetime | None = None) -> str:
+    current = value or _utc_now()
+    return current.isoformat().replace("+00:00", "Z")
 
-    # Try to fetch from CelestTrak (may fail, which is ok)
+
+def _read_metadata() -> dict[str, Any]:
     try:
-        raw_tle = fetch_tle_data()
-        if raw_tle:
-            print("TLE data fetched successfully from CelestTrak.")
-            real_data = parse_and_propagate(raw_tle)
-            if real_data and len(real_data) > 100:  # Only use if we got significant data
-                print(f"Using real data with {len(real_data)} objects")
-                return {"objects": real_data, "source": "celestrak"}
-    except Exception as e:
-        print(f"CelestTrak fetch failed: {e}")
+        return json.loads(META_CACHE_PATH.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
 
-    print(f"Using fallback mock data with {len(mock_data)} objects")
-    return {"objects": mock_data, "source": "mock"}
+
+def _cache_is_fresh() -> bool:
+    if not TLE_CACHE_PATH.exists():
+        return False
+
+    age_seconds = time.time() - TLE_CACHE_PATH.stat().st_mtime
+    return age_seconds < SOURCE_REFRESH_SECONDS
+
+
+def _looks_like_tle(text: str) -> bool:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+
+    if len(lines) < 3:
+        return False
+
+    valid_pairs = 0
+    for index in range(len(lines) - 2):
+        if lines[index + 1].startswith("1 ") and lines[index + 2].startswith("2 "):
+            valid_pairs += 1
+            if valid_pairs >= 2:
+                return True
+
+    return False
+
+
+def _download_source(name: str, url: str) -> str:
+    headers = {
+        "User-Agent": (
+            "OrbitOPS/1.0 "
+            "(educational satellite-monitoring project; "
+            "contact: tulsitomar2019@gmail.com)"
+        ),
+        "Accept": "text/plain",
+    }
+
+    last_error: Exception | None = None
+
+    for attempt in range(1, 4):
+        try:
+            response = requests.get(
+                url,
+                headers=headers,
+                timeout=REQUEST_TIMEOUT_SECONDS,
+            )
+            response.raise_for_status()
+
+            text = response.text.strip()
+            if not _looks_like_tle(text):
+                raise ValueError(f"{name} returned invalid TLE data")
+
+            return text
+
+        except (requests.RequestException, ValueError) as exc:
+            last_error = exc
+            if attempt < 3:
+                time.sleep(2 ** (attempt - 1))
+
+    raise RuntimeError(f"Unable to download {name}: {last_error}")
+
+
+def _write_cache(tle_text: str, source_names: list[str]) -> dict[str, Any]:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+    fetched_at = _iso_utc()
+    TLE_CACHE_PATH.write_text(tle_text.rstrip() + "\n", encoding="utf-8")
+
+    metadata = {
+        "source_name": "CelesTrak",
+        "source_format": "TLE/GP",
+        "last_successful_fetch": fetched_at,
+        "source_groups": source_names,
+    }
+    META_CACHE_PATH.write_text(
+        json.dumps(metadata, indent=2),
+        encoding="utf-8",
+    )
+    return metadata
+
+
+def fetch_tle_data(force_refresh: bool = False) -> tuple[str, dict[str, Any]]:
+    """
+    Return real CelesTrak TLE data.
+
+    Network data is refreshed at most once every two hours by default.
+    If CelesTrak is temporarily unavailable, the latest real cached data is used.
+    No synthetic or randomly generated orbital objects are returned.
+    """
+    metadata = _read_metadata()
+
+    if not force_refresh and _cache_is_fresh():
+        return TLE_CACHE_PATH.read_text(encoding="utf-8"), {
+            **metadata,
+            "using_cache": True,
+            "source_status": "cached-fresh",
+        }
+
+    successful_payloads: list[str] = []
+    successful_sources: list[str] = []
+    errors: list[str] = []
+
+    for name, url in CELESTRAK_SOURCES.items():
+        try:
+            successful_payloads.append(_download_source(name, url))
+            successful_sources.append(name)
+        except RuntimeError as exc:
+            errors.append(str(exc))
+
+    if successful_payloads:
+        combined = "\n".join(successful_payloads)
+        metadata = _write_cache(combined, successful_sources)
+
+        return combined, {
+            **metadata,
+            "using_cache": False,
+            "source_status": "live" if not errors else "partial-live",
+            "source_errors": errors,
+        }
+
+    if TLE_CACHE_PATH.exists():
+        return TLE_CACHE_PATH.read_text(encoding="utf-8"), {
+            **metadata,
+            "using_cache": True,
+            "source_status": "stale",
+            "source_errors": errors,
+        }
+
+    raise RuntimeError(
+        "CelesTrak is unavailable and OrbitOPS has no real cached dataset yet. "
+        + " | ".join(errors)
+    )
+
+
+def _classify_object(name: str) -> str:
+    upper_name = name.upper()
+
+    if "DEB" in upper_name or "DEBRIS" in upper_name:
+        return "DEBRIS"
+    if "R/B" in upper_name or "ROCKET" in upper_name:
+        return "ROCKET_BODY"
+    return "SATELLITE"
+
+
+def _tle_triplets(tle_text: str):
+    lines = [line.strip() for line in tle_text.splitlines() if line.strip()]
+    index = 0
+
+    while index + 2 < len(lines):
+        name, line1, line2 = lines[index : index + 3]
+
+        if line1.startswith("1 ") and line2.startswith("2 "):
+            yield name, line1, line2
+            index += 3
+        else:
+            index += 1
+
+
+def parse_and_propagate(
+    tle_text: str,
+    max_objects: int = MAX_OBJECTS,
+) -> tuple[list[dict[str, Any]], str]:
+    """
+    Propagate CelesTrak element sets to the current UTC time with SGP4.
+
+    Skyfield's EarthSatellite class runs the SGP4 model internally.
+    """
+    current_time = _TIMESCALE.now()
+    position_timestamp = current_time.utc_strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    objects: list[dict[str, Any]] = []
+    seen_catalog_numbers: set[int] = set()
+
+    for name, line1, line2 in _tle_triplets(tle_text):
+        if len(objects) >= max_objects:
+            break
+
+        try:
+            satellite = EarthSatellite(line1, line2, name, _TIMESCALE)
+            catalog_number = int(satellite.model.satnum)
+
+            if catalog_number in seen_catalog_numbers:
+                continue
+
+            geocentric = satellite.at(current_time)
+            xyz = geocentric.xyz.km
+            velocity_vector = geocentric.velocity.km_per_s
+
+            if not np.isfinite(xyz).all() or not np.isfinite(velocity_vector).all():
+                continue
+
+            latitude, longitude = wgs84.latlon_of(geocentric)
+            altitude = wgs84.height_of(geocentric).km
+            velocity = float(np.linalg.norm(velocity_vector))
+
+            if not all(
+                math.isfinite(value)
+                for value in (
+                    latitude.degrees,
+                    longitude.degrees,
+                    altitude,
+                    velocity,
+                )
+            ):
+                continue
+
+            objects.append(
+                {
+                    "id": str(catalog_number),
+                    "norad_id": catalog_number,
+                    "name": name,
+                    "type": _classify_object(name),
+                    "lat": round(float(latitude.degrees), 6),
+                    "lon": round(float(longitude.degrees), 6),
+                    "altitude_km": round(float(altitude), 3),
+                    "velocity_km_s": round(velocity, 5),
+                    "element_epoch": satellite.epoch.utc_strftime(
+                        "%Y-%m-%dT%H:%M:%SZ"
+                    ),
+                    "position_timestamp": position_timestamp,
+                    "element_source": "CelesTrak",
+                    "propagator": "SGP4",
+                    "data_mode": "live-propagated",
+                }
+            )
+            seen_catalog_numbers.add(catalog_number)
+
+        except (ValueError, TypeError, OverflowError):
+            continue
+
+    if not objects:
+        raise RuntimeError("No valid satellites could be propagated from CelesTrak data")
+
+    return objects, position_timestamp
+
+
+def get_orbital_data(force_refresh: bool = False) -> dict[str, Any]:
+    tle_text, source_metadata = fetch_tle_data(force_refresh=force_refresh)
+    objects, position_timestamp = parse_and_propagate(tle_text)
+
+    return {
+        "objects": objects,
+        "source": "celestrak",
+        "source_name": "CelesTrak",
+        "source_format": "TLE/GP",
+        "propagator": "SGP4",
+        "data_mode": "live-propagated",
+        "position_timestamp": position_timestamp,
+        **source_metadata,
+    }
