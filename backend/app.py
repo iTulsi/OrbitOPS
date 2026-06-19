@@ -120,7 +120,21 @@ CONJUNCTION_SOCKET_POLL_SECONDS = max(
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
-CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "*")
+CORS_ORIGINS_RAW = (
+    os.environ.get("CORS_ALLOWED_ORIGINS")
+    or os.environ.get("CORS_ORIGINS")
+    or "*"
+)
+
+CORS_ORIGINS = (
+    "*"
+    if CORS_ORIGINS_RAW.strip() == "*"
+    else [
+        origin.strip()
+        for origin in CORS_ORIGINS_RAW.split(",")
+        if origin.strip()
+    ]
+)
 
 
 # ============================================================
