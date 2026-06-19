@@ -12,5 +12,8 @@ services:
       - key: GEMINI_API_KEY
         sync: false
 
+      - key: SECRET_KEY
+        sync: false
+
       - key: CORS_ALLOWED_ORIGINS
         sync: false
