@@ -8,10 +8,54 @@ import requests
 import numpy as np
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
+from catalog_service import (
+    get_catalog_export,
+    get_catalog_object,
+    get_catalog_payload,
+)
+from analytics_service import get_analytics_payload
 from flask_socketio import SocketIO, emit
 
-from risk_engine import analyze_collision_pairs
 from tle_parser import get_orbital_data
+
+
+# ============================================================
+# Local environment loader
+# Loads backend/.env without adding another runtime dependency.
+# Existing shell/Render environment variables always take precedence.
+# ============================================================
+
+def _load_orbitops_env():
+    env_path = os.path.join(os.path.dirname(__file__), ".env")
+
+    if not os.path.exists(env_path):
+        return
+
+    try:
+        with open(env_path, "r", encoding="utf-8") as env_file:
+            for raw_line in env_file:
+                line = raw_line.strip()
+
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+
+                if key:
+                    os.environ.setdefault(key, value)
+    except Exception as env_error:
+        print(f"OrbitOPS environment warning: {env_error}")
+
+
+_load_orbitops_env()
+from conjunction_history import get_history_snapshot
+from conjunction_realtime import build_screening_complete_payload
+from conjunction_service import get_conjunction_snapshot
+from conjunction_socket_stream import (
+    run_conjunction_socket_worker,
+)
 
 
 # ============================================================
@@ -65,8 +109,15 @@ SECRET_KEY = os.environ.get("SECRET_KEY", "orbitops-dev-secret")
 UPDATE_INTERVAL_SECONDS = int(os.environ.get("UPDATE_INTERVAL_SECONDS", "30"))
 CACHE_TTL_SECONDS = int(os.environ.get("CACHE_TTL_SECONDS", "20"))
 HIGH_RISK_THRESHOLD = int(os.environ.get("HIGH_RISK_THRESHOLD", "60"))
+CONJUNCTION_SOCKET_POLL_SECONDS = max(
+    2,
+    int(os.environ.get(
+        "CONJUNCTION_SOCKET_POLL_SECONDS",
+        "5",
+    )),
+)
 
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "*")
@@ -552,6 +603,16 @@ def data_background_thread() -> None:
         socketio.sleep(UPDATE_INTERVAL_SECONDS)
 
 
+def conjunction_background_thread() -> None:
+    run_conjunction_socket_worker(
+        socketio=socketio,
+        snapshot_provider=get_conjunction_snapshot,
+        orbital_provider=get_orbital_data,
+        logger=logger,
+        poll_seconds=CONJUNCTION_SOCKET_POLL_SECONDS,
+    )
+
+
 def start_background_worker_once() -> None:
     global background_worker_started
 
@@ -560,8 +621,10 @@ def start_background_worker_once() -> None:
             return
 
         socketio.start_background_task(data_background_thread)
+        socketio.start_background_task(
+            conjunction_background_thread
+        )
         background_worker_started = True
-
 
 # ============================================================
 # API Routes
@@ -788,23 +851,44 @@ def get_risk_dashboard():
 
 @app.route("/api/collision-risk", methods=["GET"])
 def get_collision_risk():
+    # Backward-compatible alias for the authoritative conjunction endpoint.
     try:
-        data = update_orbit_data()
-        objects = data.get("objects", [])
+        refresh = str(request.args.get("refresh", "")).lower() in {"1", "true", "yes"}
+        limit = request.args.get("limit", 250, type=int)
 
-        risk_pairs = analyze_collision_pairs(objects)
+        payload, status_code = get_conjunction_snapshot(
+            get_orbital_data,
+            force=refresh,
+            limit=limit,
+        )
 
-        return success_response({
-            "total_objects_analyzed": len(objects),
-            "risk_pairs": risk_pairs,
-            "model_type": "baseline-rule-based-risk-engine",
-            "source": data.get("source"),
-            "last_updated": data.get("last_updated"),
+        response = dict(payload)
+        events = list(payload.get("events") or [])
+        diagnostics = (
+            payload.get("diagnostics")
+            if isinstance(payload.get("diagnostics"), dict)
+            else {}
+        )
+
+        response.update({
+            "deprecated": True,
+            "replacement_endpoint": "/api/conjunctions",
+            "risk_pairs": events,
+            "total_objects_analyzed": diagnostics.get("objects_analyzed", 0),
         })
 
+        return jsonify(response), status_code
+
     except Exception as error:
-        logger.exception("Failed to analyze collision risk")
-        return error_response(str(error))
+        logger.exception("Failed to fetch collision-risk compatibility response")
+        return jsonify({
+            "status": "error",
+            "message": str(error),
+            "events": [],
+            "risk_pairs": [],
+            "deprecated": True,
+            "replacement_endpoint": "/api/conjunctions",
+        }), 500
 
 
 @app.route("/api/stats", methods=["GET"])
@@ -874,148 +958,371 @@ def force_fetch():
 
 
 # ============================================================
-# AI Mission Briefing
+# AI Mission Briefing — grounded in real OrbitOPS snapshots
 # ============================================================
 
-def build_fallback_briefing(
-    source: str,
-    objects: List[Dict[str, Any]],
-    stats: Dict[str, Any],
-) -> str:
-    classification = stats.get("classification", {})
+def _read_json_snapshot(filename):
+    import json
 
-    return f"""
-1. Mission Status
-OrbitOPS is actively monitoring orbital objects using the {source} data pipeline.
+    path = os.path.join(os.path.dirname(__file__), "data", filename)
 
-2. Key Risk Observations
-The system is tracking {stats.get("total_objects", len(objects))} orbital objects.
-Current mission risk level is {stats.get("risk_level", "UNKNOWN")}.
+    try:
+        with open(path, "r", encoding="utf-8") as snapshot_file:
+            payload = json.load(snapshot_file)
+            return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
 
-3. Satellite/Debris Situation
-Classification summary:
-- Active satellites: {classification.get("active_satellites", 0)}
-- Debris: {classification.get("debris", 0)}
-- Rocket bodies: {classification.get("rocket_bodies", 0)}
 
-4. Recommended Operator Actions
-Operators should prioritize high-risk objects, monitor crowded LEO altitude bands,
-refresh live tracking data, and inspect objects with missing altitude or velocity values.
+def _write_json_snapshot(filename, payload):
+    import json
 
-5. Final Risk Level
-Final risk level: {stats.get("risk_level", "UNKNOWN")}.
-""".strip()
+    data_dir = os.path.join(os.path.dirname(__file__), "data")
+    os.makedirs(data_dir, exist_ok=True)
+    path = os.path.join(data_dir, filename)
+    temporary_path = f"{path}.tmp"
+
+    with open(temporary_path, "w", encoding="utf-8") as snapshot_file:
+        json.dump(payload, snapshot_file, indent=2, ensure_ascii=False)
+
+    os.replace(temporary_path, path)
+
+
+def _event_severity(event):
+    value = (
+        event.get("severity")
+        or event.get("risk_level")
+        or event.get("risk")
+        or event.get("level")
+        or "MONITORED"
+    )
+    return str(value).strip().upper()
+
+
+def _event_value(event, *keys, default=None):
+    for key in keys:
+        value = event.get(key)
+        if value is not None:
+            return value
+    return default
+
+
+def _compact_conjunction_event(event):
+    return {
+        "event_id": _event_value(event, "event_id", "id"),
+        "severity": _event_severity(event),
+        "object_a": _event_value(event, "object_a", "primary_name", "name_a"),
+        "object_b": _event_value(event, "object_b", "secondary_name", "name_b"),
+        "norad_a": _event_value(event, "norad_a", "primary_norad", "object_a_id"),
+        "norad_b": _event_value(event, "norad_b", "secondary_norad", "object_b_id"),
+        "closest_approach_utc": _event_value(
+            event,
+            "closest_approach_utc",
+            "tca",
+            "closest_approach",
+        ),
+        "miss_distance_km": _event_value(
+            event,
+            "miss_distance_km",
+            "miss_distance",
+            "distance_km",
+        ),
+        "relative_velocity_km_s": _event_value(
+            event,
+            "relative_velocity_km_s",
+            "relative_velocity",
+            "velocity_km_s",
+        ),
+        "altitude_km": _event_value(event, "altitude_km", "altitude"),
+        "risk_index": _event_value(event, "risk_index", "risk_score", "score"),
+    }
+
+
+def _safe_number(value, default=0.0):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _conjunction_context(snapshot):
+    raw_events = snapshot.get("events")
+    if not isinstance(raw_events, list):
+        nested_data = snapshot.get("data")
+        raw_events = nested_data.get("events") if isinstance(nested_data, dict) else []
+    events = raw_events if isinstance(raw_events, list) else []
+
+    counts = {
+        "CRITICAL": 0,
+        "HIGH": 0,
+        "MEDIUM": 0,
+        "MONITORED": 0,
+    }
+
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        severity = _event_severity(event)
+        if severity in counts:
+            counts[severity] += 1
+        elif severity in {"LOW", "INFO"}:
+            counts["MONITORED"] += 1
+
+    supplied_summary = snapshot.get("summary")
+    if isinstance(supplied_summary, dict):
+        aliases = {
+            "CRITICAL": ("critical", "critical_events"),
+            "HIGH": ("high", "high_risk", "high_events"),
+            "MEDIUM": ("medium", "medium_events"),
+            "MONITORED": ("monitored", "low", "monitored_events"),
+        }
+        for output_key, candidate_keys in aliases.items():
+            for candidate_key in candidate_keys:
+                if supplied_summary.get(candidate_key) is not None:
+                    try:
+                        counts[output_key] = int(supplied_summary[candidate_key])
+                    except (TypeError, ValueError):
+                        pass
+                    break
+
+    ranked = sorted(
+        [event for event in events if isinstance(event, dict)],
+        key=lambda event: _safe_number(
+            _event_value(event, "risk_index", "risk_score", "score", default=0),
+            0.0,
+        ),
+        reverse=True,
+    )
+
+    if counts["CRITICAL"] > 0:
+        operational_level = "CRITICAL"
+    elif counts["HIGH"] > 0:
+        operational_level = "HIGH"
+    elif counts["MEDIUM"] > 0:
+        operational_level = "ELEVATED"
+    elif events:
+        operational_level = "MONITORED"
+    else:
+        operational_level = "NO ACTIVE EVENTS"
+
+    return {
+        "status": snapshot.get("status", "unavailable"),
+        "screening_stage": snapshot.get("screening_stage"),
+        "updated_at": snapshot.get("generated_at") or snapshot.get("last_updated"),
+        "counts": counts,
+        "total_events": len(events),
+        "operational_level": operational_level,
+        "top_events": [_compact_conjunction_event(event) for event in ranked[:8]],
+    }
+
+
+def _cached_ai_response(message=None):
+    cache = _read_json_snapshot("ai_briefing_cache.json")
+    briefing = cache.get("briefing")
+
+    if not briefing:
+        return None
+
+    response = {
+        "status": "cached",
+        "model": cache.get("model", "unknown"),
+        "briefing": briefing,
+        "grounded": True,
+        "cached": True,
+        "generated_at": cache.get("generated_at"),
+        "telemetry_source": cache.get("telemetry_source", "CelesTrak + SGP4"),
+    }
+
+    if message:
+        response["message"] = message
+
+    return response
 
 
 @app.route("/api/ai/briefing", methods=["GET"])
 def ai_mission_briefing():
-    try:
-        data = update_orbit_data()
+    import json
+    from datetime import datetime, timezone
 
-        objects = data.get("objects", [])
-        stats = data.get("stats", {})
-        source = data.get("source", "unknown")
-        high_risk_objects = data.get("high_risk_objects", [])[:5]
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    model = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash").strip()
 
-        fallback_briefing = build_fallback_briefing(
-            source=source,
-            objects=objects,
-            stats=stats,
+    if not api_key:
+        cached = _cached_ai_response(
+            "Live AI generation is unavailable because GEMINI_API_KEY is not configured."
         )
+        if cached:
+            return jsonify(cached)
 
-        if not GEMINI_API_KEY:
-            return jsonify({
-                "status": "fallback",
-                "model": "rule-based-fallback",
-                "briefing": fallback_briefing,
-                "message": "GEMINI_API_KEY is not configured.",
+        return jsonify({
+            "status": "ai_unavailable",
+            "model": model,
+            "grounded": False,
+            "message": (
+                "GEMINI_API_KEY is not configured. OrbitOPS will not present a "
+                "hard-coded briefing as AI-generated output."
+            ),
+        }), 503
+
+    try:
+        live_data = update_orbit_data()
+        objects = live_data.get("objects", [])
+        stats = live_data.get("stats", {})
+        source = live_data.get("source", "CelesTrak")
+        classification = stats.get("classification", {})
+        altitude_bands = stats.get("altitude_bands", {})
+
+        conjunction_snapshot = _read_json_snapshot("conjunction_snapshot.json")
+        conjunctions = _conjunction_context(conjunction_snapshot)
+
+        top_objects = []
+        for item in live_data.get("high_risk_objects", [])[:10]:
+            if not isinstance(item, dict):
+                continue
+            top_objects.append({
+                "name": item.get("name"),
+                "norad_id": item.get("norad_id") or item.get("id"),
+                "type": item.get("type"),
+                "altitude_km": item.get("altitude_km"),
+                "velocity_km_s": item.get("velocity_km_s"),
+                "screening_priority_score": item.get("risk_score"),
+                "screening_priority_level": item.get("risk_level"),
             })
 
+        generated_at = datetime.now(timezone.utc).isoformat()
+        grounding_payload = {
+            "generated_at_utc": generated_at,
+            "telemetry": {
+                "source": source,
+                "propagator": "SGP4",
+                "last_updated": live_data.get("last_updated"),
+                "objects_in_current_frame": stats.get("total_objects", len(objects)),
+                "classification": classification,
+                "altitude_bands": altitude_bands,
+            },
+            "conjunction_screening": conjunctions,
+            "priority_objects": top_objects,
+            "limitations": [
+                "Object priority scores are screening heuristics, not collision probabilities.",
+                "Do not claim a collision probability unless a validated probability value exists in the event data.",
+                "Do not label the whole mission CRITICAL solely because debris exists or because an object has a high heuristic score.",
+                "Base the operational risk level primarily on the conjunction screening results.",
+            ],
+        }
+
         prompt = f"""
-You are OrbitOPS AI Mission Analyst.
+You are the OrbitOPS orbital operations analyst.
 
-Analyze this orbital monitoring data and generate a concise mission briefing.
+Create a concise, professional mission briefing using ONLY the supplied JSON telemetry and conjunction-screening data. Treat every number as evidence that must be traceable to the JSON. Do not invent launches, decays, probabilities, object ownership, maneuverability, or event details.
 
-Data source:
-{source}
+Important interpretation rules:
+- A screening-priority score is not a collision probability.
+- The mission-level risk must be based primarily on actual conjunction events.
+- If conjunction screening is warming, incomplete, unavailable, or contains no active events, state that clearly rather than declaring CRITICAL.
+- Use precise language such as "screening candidate", "miss distance", and "relative velocity" where supported.
+- Give recommended actions tied to named events or measurable orbital conditions.
+- Keep the briefing readable for a mission-control dashboard.
 
-System stats:
-{stats}
-
-Top high-risk objects:
-{high_risk_objects}
-
-Write in this structure:
+Return exactly these five sections as plain text:
 1. Mission Status
-2. Key Risk Observations
-3. Satellite/Debris Situation
+2. Key Conjunction Observations
+3. Orbital Environment
 4. Recommended Operator Actions
-5. Final Risk Level
+5. Operational Risk Assessment
 
-Important:
-- Do not exaggerate.
-- Do not claim exact collision probability.
-- Explain risk based on tracking, object type, altitude, and velocity.
-- Keep it professional and dashboard-ready.
+Grounding JSON:
+{json.dumps(grounding_payload, ensure_ascii=False, separators=(",", ":"))}
 """.strip()
 
         url = (
             "https://generativelanguage.googleapis.com/v1beta/"
-            f"models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+            f"models/{model}:generateContent?key={api_key}"
         )
 
-        payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {"text": prompt}
-                    ]
-                }
-            ]
-        }
-
-        response = requests.post(url, json=payload, timeout=30)
+        response = requests.post(
+            url,
+            json={
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {
+                    "temperature": 0.15,
+                    "topP": 0.8,
+                    "maxOutputTokens": 1400,
+                },
+            },
+            timeout=45,
+        )
 
         if response.status_code == 429:
+            cached = _cached_ai_response(
+                "Gemini rate limit reached. Showing the last genuinely AI-generated briefing."
+            )
+            if cached:
+                return jsonify(cached)
             return jsonify({
-                "status": "fallback",
-                "model": "quota-safe-fallback",
-                "briefing": fallback_briefing,
-                "message": "Gemini quota or rate limit reached.",
-            })
+                "status": "ai_unavailable",
+                "model": model,
+                "grounded": False,
+                "message": "Gemini rate limit reached and no previous AI briefing is cached.",
+            }), 503
 
         response.raise_for_status()
         result = response.json()
-
-        briefing = (
-            result.get("candidates", [{}])[0]
-            .get("content", {})
-            .get("parts", [{}])[0]
-            .get("text", "")
-            .strip()
+        candidates = result.get("candidates") or []
+        parts = (
+            candidates[0].get("content", {}).get("parts", [])
+            if candidates
+            else []
         )
+        text = "\n".join(
+            str(part.get("text", "")).strip()
+            for part in parts
+            if isinstance(part, dict) and part.get("text")
+        ).strip()
 
-        if not briefing:
-            briefing = fallback_briefing
+        if not text:
+            raise ValueError("Gemini returned an empty briefing")
 
-        return success_response({
-            "model": GEMINI_MODEL,
-            "briefing": briefing,
-        })
+        cache_payload = {
+            "status": "ok",
+            "model": model,
+            "briefing": text,
+            "grounded": True,
+            "cached": False,
+            "generated_at": generated_at,
+            "telemetry_source": f"{source} + SGP4",
+            "conjunction_status": conjunctions.get("status"),
+            "conjunction_stage": conjunctions.get("screening_stage"),
+        }
+        _write_json_snapshot("ai_briefing_cache.json", cache_payload)
+        return jsonify(cache_payload)
 
-    except Exception:
-        logger.exception("AI briefing failed")
-
+    except requests.RequestException as error:
+        print(f"AI briefing provider error: {error}")
+        cached = _cached_ai_response(
+            "The AI provider is temporarily unavailable. Showing the last genuinely AI-generated briefing."
+        )
+        if cached:
+            return jsonify(cached)
         return jsonify({
-            "status": "fallback",
-            "model": "safe-error-fallback",
-            "briefing": (
-                "OrbitOPS AI Briefing is temporarily unavailable. "
-                "The system is still tracking orbital objects and monitoring mission risk indicators."
-            ),
-            "message": "AI briefing failed safely without exposing server secrets.",
-        })
+            "status": "ai_unavailable",
+            "model": model,
+            "grounded": False,
+            "message": "The AI provider request failed and no previous AI briefing is cached.",
+        }), 502
 
+    except Exception as error:
+        print(f"AI briefing error: {error}")
+        cached = _cached_ai_response(
+            "Live generation failed. Showing the last genuinely AI-generated briefing."
+        )
+        if cached:
+            return jsonify(cached)
+        return jsonify({
+            "status": "ai_unavailable",
+            "model": model,
+            "grounded": False,
+            "message": str(error),
+        }), 500
 
 # ============================================================
 # Socket.IO Events
@@ -1043,6 +1350,25 @@ def socket_connect():
             "source": data.get("source"),
         })
 
+        conjunction_payload, conjunction_status = (
+            get_conjunction_snapshot(
+                get_orbital_data,
+                force=False,
+                limit=5,
+            )
+        )
+        if (
+            conjunction_status == 200
+            and isinstance(conjunction_payload, dict)
+            and conjunction_payload.get("last_updated")
+        ):
+            emit(
+                "conjunction_screening_complete",
+                build_screening_complete_payload(
+                    conjunction_payload
+                ),
+            )
+
     except Exception as error:
         logger.exception("Socket connect data load failed")
 
@@ -1060,6 +1386,149 @@ def socket_disconnect():
 # React Frontend Serving
 # Keep this after all /api routes.
 # ============================================================
+
+
+
+@app.route("/api/conjunction-history", methods=["GET"])
+def get_conjunction_history():
+    try:
+        limit = request.args.get("limit", 250, type=int)
+        status = request.args.get("status", "all")
+        return jsonify(get_history_snapshot(
+            limit=limit,
+            status=status,
+        )), 200
+    except ValueError as error:
+        return jsonify({
+            "status": "error",
+            "message": str(error),
+        }), 400
+    except Exception as error:
+        app.logger.exception("OrbitOPS conjunction history endpoint failed")
+        return jsonify({
+            "status": "error",
+            "message": "Conjunction history could not be read.",
+            "detail": str(error),
+            "events": [],
+        }), 500
+
+
+@app.route("/api/conjunctions", methods=["GET"])
+def get_conjunctions():
+    """Return cached conjunction screening immediately and refresh in the background."""
+    try:
+        refresh = str(request.args.get("refresh", "")).lower() in {"1", "true", "yes"}
+        limit = request.args.get("limit", 250, type=int)
+        payload, status_code = get_conjunction_snapshot(
+            get_orbital_data,
+            force=refresh,
+            limit=limit,
+        )
+        return jsonify(payload), status_code
+    except Exception as error:
+        return jsonify({
+            "status": "error",
+            "message": str(error),
+            "events": [],
+            "summary": {
+                "critical": 0,
+                "high": 0,
+                "medium": 0,
+                "monitored": 0,
+                "total": 0,
+            },
+        }), 500
+
+
+
+
+# ORBITOPS_ANALYTICS_ROUTE_V1
+@app.route("/api/analytics", methods=["GET"])
+def orbitops_analytics():
+    try:
+        refresh = str(request.args.get("refresh", "0")).lower() in {"1", "true", "yes"}
+        window = request.args.get("window", "7d")
+        object_type = request.args.get("object_type", "ALL")
+        return jsonify(get_analytics_payload(
+            window=window,
+            object_type=object_type,
+            refresh=refresh,
+        ))
+    except Exception as exc:
+        app.logger.exception("OrbitOPS analytics endpoint failed")
+        return jsonify({
+            "status": "error",
+            "message": "Analytics aggregation failed safely.",
+            "detail": str(exc),
+        }), 500
+
+
+
+
+# ORBITOPS_OBJECT_CATALOG_ROUTE_V1
+def _orbitops_catalog_filters():
+    return {
+        "query": request.args.get("query", ""),
+        "object_types": request.args.get("object_types", ""),
+        "regimes": request.args.get("regimes", ""),
+        "min_altitude": request.args.get("min_altitude"),
+        "max_altitude": request.args.get("max_altitude"),
+        "min_inclination": request.args.get("min_inclination"),
+        "max_inclination": request.args.get("max_inclination"),
+        "owner": request.args.get("owner", "ALL"),
+        "status": request.args.get("status", "ALL"),
+        "sort_by": request.args.get("sort_by", "norad_id"),
+        "sort_dir": request.args.get("sort_dir", "asc"),
+    }
+
+
+@app.route("/api/catalog", methods=["GET"])
+def orbitops_object_catalog():
+    try:
+        refresh = str(request.args.get("refresh", "0")).lower() in {"1", "true", "yes"}
+        return jsonify(get_catalog_payload(
+            page=request.args.get("page", 1, type=int),
+            per_page=request.args.get("per_page", 25, type=int),
+            refresh=refresh,
+            **_orbitops_catalog_filters(),
+        ))
+    except Exception as exc:
+        app.logger.exception("OrbitOPS object catalog endpoint failed")
+        return jsonify({
+            "status": "error",
+            "message": "Object catalog aggregation failed safely.",
+            "detail": str(exc),
+        }), 500
+
+
+@app.route("/api/catalog/object/<norad_id>", methods=["GET"])
+def orbitops_object_catalog_detail(norad_id):
+    try:
+        refresh = str(request.args.get("refresh", "0")).lower() in {"1", "true", "yes"}
+        payload = get_catalog_object(norad_id, refresh=refresh)
+        status_code = 404 if payload.get("status") == "error" else 200
+        return jsonify(payload), status_code
+    except Exception as exc:
+        app.logger.exception("OrbitOPS catalog detail endpoint failed")
+        return jsonify({
+            "status": "error",
+            "message": "Object detail lookup failed safely.",
+            "detail": str(exc),
+        }), 500
+
+
+@app.route("/api/catalog/export", methods=["GET"])
+def orbitops_object_catalog_export():
+    try:
+        return jsonify(get_catalog_export(**_orbitops_catalog_filters()))
+    except Exception as exc:
+        app.logger.exception("OrbitOPS catalog export endpoint failed")
+        return jsonify({
+            "status": "error",
+            "message": "Object catalog export failed safely.",
+            "detail": str(exc),
+        }), 500
+
 
 @app.route("/", defaults={"path": ""})
 @app.route("/<path:path>")
@@ -1090,6 +1559,7 @@ def serve_frontend(path: str):
             "/api/data-status",
             "/api/high-risk",
             "/api/risk",
+            "/api/conjunctions",
             "/api/collision-risk",
             "/api/stats",
             "/api/search?q=ISS",

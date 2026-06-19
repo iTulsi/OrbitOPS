@@ -17,3 +17,48 @@ frontend/dist/
 frontend/node_modules/
 node_modules/
 venv/
+# OrbitOPS local AI credentials/cache
+backend/.env
+backend/data/ai_briefing_cache.json
+# OrbitOPS local patch backups
+.sgp4-engine-backup/
+.conjunction-reliability-backup/
+.conjunction-history-backup/
+.conjunction-socket-backup/
+.frontend-conjunction-realtime-backup/
+# Runtime conjunction state
+backend/data/conjunction_history.json
+backend/data/conjunction_history.json.tmp
+backend/data/conjunction_snapshot.json
+backend/data/conjunction_snapshot.json.tmp
+# Local patch installers
+apply_*.py
+apply_*.sh
+harden_*.py
+# macOS
+# Local OrbitOPS backups
+.conjunction-backup/
+.motion-backup/
+.orbitops-backups/
+.overview-backup/
+# Temporary source backups
+**/*.before-*
+**/*.backup.*
+backend/.env.backup.*
+backend/requirements.txt.before_*
+# Local audit output
+conjunction_audit.txt
+sgp4_audit.txt
+socket_worker_audit.txt
+frontend_alerts_audit.txt
+*_audit.txt
+# Local patch utilities
+restore_*.py
+**/.DS_Store
+**/__pycache__/
+*.py[cod]
+*.backup*
+*.before-*
+*.bak
+*.orig
+.*backup*/

@@ -1,0 +1,3 @@
+
+# Generated Vite production bundles
+frontend/dist/** -whitespace
