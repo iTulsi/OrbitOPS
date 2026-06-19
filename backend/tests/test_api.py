@@ -167,47 +167,66 @@ def test_high_risk_endpoint_returns_only_high_risk_objects(
     assert payload["objects"][0]["risk_level"] == "CRITICAL"
 
 
-def test_collision_risk_endpoint_returns_analysis(
+def test_collision_risk_endpoint_uses_conjunction_snapshot(
     client,
-    mock_orbit_data,
     monkeypatch,
 ):
-    expected_pairs = [
-        {
-            "object_a": "ISS",
-            "object_b": "Debris Alpha",
-            "risk_score": 82,
-            "risk_level": "CRITICAL",
-        }
-    ]
+    expected_event = {
+        "id": "CONJ-TEST",
+        "object_a": {"id": "25544", "name": "ISS"},
+        "object_b": {"id": "99999", "name": "Debris Alpha"},
+        "risk_score": 82.0,
+        "risk_level": "HIGH",
+        "miss_distance_km": 4.2,
+    }
 
     monkeypatch.setattr(
         orbit_app,
-        "analyze_collision_pairs",
-        lambda objects: expected_pairs,
+        "get_conjunction_snapshot",
+        lambda provider, force=False, limit=250: (
+            {
+                "status": "live",
+                "model_type": "baseline-linear-relative-motion-screening",
+                "events": [expected_event],
+                "summary": {
+                    "critical": 0,
+                    "high": 1,
+                    "medium": 0,
+                    "monitored": 0,
+                    "total": 1,
+                },
+                "diagnostics": {"objects_analyzed": 2},
+            },
+            200,
+        ),
     )
 
-    response = client.get("/api/collision-risk")
+    response = client.get("/api/collision-risk?limit=1")
     payload = response.get_json()
 
     assert response.status_code == 200
-    assert payload["status"] == "ok"
+    assert payload["status"] == "live"
+    assert payload["events"] == [expected_event]
+    assert payload["risk_pairs"] == [expected_event]
     assert payload["total_objects_analyzed"] == 2
-    assert payload["risk_pairs"] == expected_pairs
-    assert payload["model_type"] == "baseline-rule-based-risk-engine"
+    assert payload["deprecated"] is True
+    assert payload["replacement_endpoint"] == "/api/conjunctions"
+    assert payload["model_type"] == "baseline-linear-relative-motion-screening"
 
 
-def test_ai_briefing_uses_safe_fallback_without_api_key(
+
+def test_ai_briefing_reports_unavailable_without_key_or_cache(
     client,
     mock_orbit_data,
     monkeypatch,
 ):
-    monkeypatch.setattr(orbit_app, "GEMINI_API_KEY", None)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr(orbit_app, "_cached_ai_response", lambda message=None: None)
 
     response = client.get("/api/ai/briefing")
     payload = response.get_json()
 
-    assert response.status_code == 200
-    assert payload["status"] == "fallback"
-    assert payload["model"] == "rule-based-fallback"
-    assert "Mission Status" in payload["briefing"]
+    assert response.status_code == 503
+    assert payload["status"] == "ai_unavailable"
+    assert payload["grounded"] is False
+    assert "GEMINI_API_KEY" in payload["message"]
