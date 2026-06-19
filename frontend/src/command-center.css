@@ -2735,3 +2735,47 @@ body {
 .live-map-controls button {
     pointer-events: auto;
 }
+
+.route-loading-shell {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.8rem;
+    background:
+        radial-gradient(circle at center, rgba(34, 211, 238, 0.08), transparent 32rem),
+        #03070d;
+    color: rgba(226, 232, 240, 0.82);
+    font-size: 0.82rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.route-loading-indicator {
+    width: 0.72rem;
+    height: 0.72rem;
+    border-radius: 999px;
+    background: currentColor;
+    box-shadow: 0 0 1.2rem rgba(34, 211, 238, 0.8);
+    animation: orbitops-route-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes orbitops-route-pulse {
+    0%,
+    100% {
+        opacity: 0.35;
+        transform: scale(0.8);
+    }
+
+    50% {
+        opacity: 1;
+        transform: scale(1.12);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .route-loading-indicator {
+        animation: none;
+    }
+}
