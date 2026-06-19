@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import {
     BrowserRouter as Router,
     Navigate,
@@ -8,19 +8,37 @@ import {
 import './command-center.css';
 
 import Layout from './components/Layout';
-import Dashboard from './components/Dashboard';
 
-import Home from './pages/Home';
-import Visualization from './pages/Visualization';
-import Alerts from './pages/Alerts';
-import Reports from './pages/Reports';
-import Satellites from './pages/Satellites';
-import Launches from './pages/Launches';
 
 import { orbitApi } from './services/api';
 import { orbitSocket as socket } from './services/socket';
 
 import OrbitMotionStage from './components/OrbitMotionStage';
+
+const Dashboard = lazy(() => import('./components/Dashboard'));
+const Home = lazy(() => import('./pages/Home'));
+const Visualization = lazy(() => import('./pages/Visualization'));
+const Alerts = lazy(() => import('./pages/Alerts'));
+const Reports = lazy(() => import('./pages/Reports'));
+const Satellites = lazy(() => import('./pages/Satellites'));
+const Launches = lazy(() => import('./pages/Launches'));
+
+function RouteLoader() {
+    return (
+        <div
+            className="route-loading-shell"
+            role="status"
+            aria-live="polite"
+        >
+            <span
+                className="route-loading-indicator"
+                aria-hidden="true"
+            />
+            <span>Loading mission module…</span>
+        </div>
+    );
+}
+
 function AppPage({ children, connected }) {
     return (
         <Layout connected={connected}>
@@ -125,7 +143,8 @@ function App() {
     return (
         <Router>
             <OrbitMotionStage>
-            <Routes>
+            <Suspense fallback={<RouteLoader />}>
+                <Routes>
                 <Route
                     path="/"
                     element={
@@ -233,7 +252,8 @@ function App() {
                 />
 
                 <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
+                </Routes>
+            </Suspense>
             </OrbitMotionStage>
         </Router>
     );
