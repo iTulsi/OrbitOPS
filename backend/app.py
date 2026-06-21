@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests
 import numpy as np
 from flask import Flask, jsonify, request, send_from_directory
+from werkzeug.utils import safe_join
 from flask_cors import CORS
 from catalog_service import (
     get_catalog_export,
@@ -141,11 +142,10 @@ CORS_ORIGINS = (
 # Flask App
 # ============================================================
 
-app = Flask(
-    __name__,
-    static_folder=FRONTEND_DIST_DIR,
-    static_url_path="",
-)
+# Disable Flask's automatic root-level static route.
+# OrbitOPS serves built files explicitly so React deep links fall back
+# to index.html instead of being intercepted as missing static files.
+app = Flask(__name__, static_folder=None)
 
 app.config["SECRET_KEY"] = SECRET_KEY
 
@@ -1547,23 +1547,38 @@ def orbitops_object_catalog_export():
 @app.route("/", defaults={"path": ""})
 @app.route("/<path:path>")
 def serve_frontend(path: str):
-    if path.startswith("api/"):
-        return error_response("API route not found", status_code=404)
+    if path == "api" or path.startswith("api/"):
+        return error_response(
+            "API route not found",
+            status_code=404,
+        )
 
     if path:
-        requested_file = os.path.join(app.static_folder, path)
+        requested_file = safe_join(FRONTEND_DIST_DIR, path)
 
-        if os.path.exists(requested_file):
-            return send_from_directory(app.static_folder, path)
+        if requested_file and os.path.isfile(requested_file):
+            return send_from_directory(
+                FRONTEND_DIST_DIR,
+                path,
+            )
 
-    index_file = os.path.join(app.static_folder, "index.html")
+    index_file = os.path.join(
+        FRONTEND_DIST_DIR,
+        "index.html",
+    )
 
-    if os.path.exists(index_file):
-        return send_from_directory(app.static_folder, "index.html")
+    if os.path.isfile(index_file):
+        return send_from_directory(
+            FRONTEND_DIST_DIR,
+            "index.html",
+        )
 
     return jsonify({
         "status": "frontend_not_built",
-        "message": "React build not found. Run `npm run build` inside the frontend folder.",
+        "message": (
+            "React build not found. Run `npm run build` "
+            "inside the frontend folder."
+        ),
         "backend": "OrbitOPS API is running.",
         "available_endpoints": [
             "/api/health",
