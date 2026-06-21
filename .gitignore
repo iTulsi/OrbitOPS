@@ -62,3 +62,10 @@ restore_*.py
 *.bak
 *.orig
 .*backup*/
+
+# Production resilience: commit only the curated real CelesTrak seed cache
+!backend/data/
+backend/data/*
+!backend/data/celestrak_omm/
+backend/data/celestrak_omm/*
+!backend/data/celestrak_omm/*.json

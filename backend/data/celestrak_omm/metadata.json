@@ -1,0 +1,35 @@
+{
+  "source_name": "CelesTrak",
+  "source_format": "OMM JSON/GP",
+  "last_successful_fetch": "2026-06-21T18:22:44.571935Z",
+  "source_groups": [
+    "active",
+    "rocket-bodies",
+    "fengyun-1c-debris",
+    "iridium-33-debris",
+    "cosmos-2251-debris"
+  ],
+  "source_counts": {
+    "active": 700,
+    "rocket-bodies": 220,
+    "fengyun-1c-debris": 260,
+    "iridium-33-debris": 111,
+    "cosmos-2251-debris": 220
+  },
+  "seed_original_counts": {
+    "active": 15831,
+    "rocket-bodies": 2177,
+    "fengyun-1c-debris": 1914,
+    "iridium-33-debris": 111,
+    "cosmos-2251-debris": 587
+  },
+  "seed_generated_at": "2026-06-21T18:22:44.571935Z",
+  "live_sources": [],
+  "cached_sources": [
+    "active",
+    "rocket-bodies",
+    "fengyun-1c-debris",
+    "iridium-33-debris",
+    "cosmos-2251-debris"
+  ]
+}
