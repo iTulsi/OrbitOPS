@@ -230,3 +230,19 @@ def test_ai_briefing_reports_unavailable_without_key_or_cache(
     assert payload["status"] == "ai_unavailable"
     assert payload["grounded"] is False
     assert "GEMINI_API_KEY" in payload["message"]
+
+
+def test_force_fetch_passes_force_refresh_parameter(client, monkeypatch):
+    called_kwargs = {}
+
+    def mock_get_orbital_data(force_refresh=False):
+        called_kwargs["force_refresh"] = force_refresh
+        return {"objects": []}
+
+    monkeypatch.setattr(orbit_app, "get_orbital_data", mock_get_orbital_data)
+
+    response = client.post("/api/force_fetch")
+
+    assert response.status_code == 200
+    assert called_kwargs.get("force_refresh") is True
+
