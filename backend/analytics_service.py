@@ -676,7 +676,7 @@ def _background_refresh() -> None:
         try:
             from tle_parser import get_orbital_data  # type: ignore
             try:
-                result = get_orbital_data(force=True)
+                result = get_orbital_data(force_refresh=True)
             except TypeError:
                 result = get_orbital_data()
         except Exception as exc:  # Network/parser failures must not remove cached UI data.
