@@ -181,3 +181,7 @@ It must not be used as the sole source for spacecraft maneuver planning, collisi
 
 - GitHub: [@iTulsi](https://github.com/iTulsi)
 - Live application: [OrbitOPS](https://orbitops-shjr.onrender.com)
+
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, testing, branch naming, and pull request guidelines.
