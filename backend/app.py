@@ -535,7 +535,7 @@ def update_orbit_data(force: bool = False) -> Dict[str, Any]:
     if should_use_cache(force, current_time):
         return get_cached_orbit_data()
 
-    result = get_orbital_data()
+    result = get_orbital_data(force_refresh=force)
 
     if not isinstance(result, dict):
         raise ValueError("get_orbital_data() returned invalid data")
