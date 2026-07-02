@@ -1,0 +1,8 @@
+# Route repository changes to the project maintainer for review.
+* @iTulsi
+
+# Keep ownership explicit for high-impact areas.
+/backend/ @iTulsi
+/frontend/ @iTulsi
+/.github/ @iTulsi
+/docs/ @iTulsi
