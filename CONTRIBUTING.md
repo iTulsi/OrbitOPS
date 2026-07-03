@@ -322,3 +322,9 @@ Feature requests should explain:
 * Testing requirements
 
 Thank you for helping improve OrbitOPS.
+
+## Issue-first contribution workflow
+
+Before implementing a non-trivial bug fix, refactor, cleanup, or feature, open or join an issue and wait for maintainer confirmation of the scope. An open issue documents a problem; it does not automatically approve every proposed implementation.
+
+Maintainers use the decision process in [`docs/maintainer-triage.md`](docs/maintainer-triage.md) to mark work as accepted, needing design, future roadmap, or not planned. This avoids duplicate pull requests and protects contributors from spending time on changes that conflict with active architecture or project timing.
