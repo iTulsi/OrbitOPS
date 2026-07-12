@@ -1,7 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "installCommand": "npm --prefix frontend ci",
-  "buildCommand": "VITE_REALTIME_MODE=polling npm --prefix frontend run build -- --outDir ../public --emptyOutDir",
+  "buildCommand": "npm --prefix frontend ci && VITE_REALTIME_MODE=polling npm --prefix frontend run build -- --outDir ../public --emptyOutDir",
   "outputDirectory": "public",
   "functions": {
     "api/index.py": {

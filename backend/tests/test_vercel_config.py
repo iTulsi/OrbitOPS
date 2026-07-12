@@ -9,6 +9,10 @@ def test_vercel_builds_the_vite_frontend_and_routes_api_first():
     config = json.loads((REPOSITORY_ROOT / "vercel.json").read_text(encoding="utf-8"))
 
     assert config["outputDirectory"] == "public"
+    assert "installCommand" not in config
+    assert config["buildCommand"].startswith(
+        "npm --prefix frontend ci && "
+    )
     assert "frontend run build" in config["buildCommand"]
     assert "VITE_REALTIME_MODE=polling" in config["buildCommand"]
     assert config["functions"]["api/index.py"]["maxDuration"] == 300
