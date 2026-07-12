@@ -1250,11 +1250,15 @@ Grounding JSON:
 
         url = (
             "https://generativelanguage.googleapis.com/v1beta/"
-            f"models/{model}:generateContent?key={api_key}"
+            f"models/{model}:generateContent"
         )
 
         response = requests.post(
             url,
+            headers={
+                "Content-Type": "application/json",
+                "x-goog-api-key": api_key,
+            },
             json={
                 "contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": {
