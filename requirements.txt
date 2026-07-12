@@ -1,1 +1,9 @@
--r backend/requirements.txt
+flask
+flask-cors
+flask-socketio
+requests
+numpy
+sgp4>=2.24,<3
+skyfield>=1.49,<2
+gunicorn
+simple-websocket

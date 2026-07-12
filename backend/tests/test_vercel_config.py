@@ -31,3 +31,27 @@ def test_vercel_entrypoint_exposes_flask_without_daemon_workers():
 
     assert response.status_code == 200
     assert response.get_json()["system"] == "OrbitOPS"
+
+def test_root_requirements_are_vercel_parseable_and_match_backend():
+    root_requirements = (
+        REPOSITORY_ROOT / "requirements.txt"
+    ).read_text(encoding="utf-8").splitlines()
+
+    backend_requirements = (
+        REPOSITORY_ROOT / "backend" / "requirements.txt"
+    ).read_text(encoding="utf-8").splitlines()
+
+    normalise = lambda lines: [
+        line.strip()
+        for line in lines
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+
+    root_dependencies = normalise(root_requirements)
+    backend_dependencies = normalise(backend_requirements)
+
+    assert root_dependencies == backend_dependencies
+    assert not any(
+        dependency.startswith(("-r ", "--requirement "))
+        for dependency in root_dependencies
+    )
