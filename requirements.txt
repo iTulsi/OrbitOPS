@@ -1,9 +1,1 @@
-flask
-flask-cors
-flask-socketio
-requests
-numpy
-sgp4
-skyfield
-eventlet
-gunicorn
+-r backend/requirements.txt

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "npm --prefix frontend ci",
+  "buildCommand": "VITE_REALTIME_MODE=polling npm --prefix frontend run build -- --outDir ../public --emptyOutDir",
+  "outputDirectory": "public",
+  "functions": {
+    "api/index.py": {
+      "maxDuration": 300,
+      "includeFiles": "backend/**"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "/api/index?path=:path*"
+    },
+    {
+      "source": "/socket.io/:path*",
+      "destination": "/api/index?socket_path=:path*"
+    },
+    {
+      "source": "/:path*",
+      "destination": "/index.html"
+    }
+  ]
+}
