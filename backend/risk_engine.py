@@ -136,3 +136,143 @@ def analyze_collision_pairs(objects, limit=10):
     risk_pairs.sort(key=lambda item: item["risk_score"], reverse=True)
 
     return risk_pairs[:limit]
+
+
+UNCONTROLLED_OBJECT_TYPES = frozenset({"DEBRIS", "ROCKET_BODY"})
+
+
+def _require_non_negative_finite(value, *, field):
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field} must be a finite non-negative number") from exc
+    if not math.isfinite(parsed) or parsed < 0:
+        raise ValueError(f"{field} must be a finite non-negative number")
+    return parsed
+
+
+def _normalize_object_type(value):
+    text = str(value or "UNKNOWN").upper().replace("-", "_").replace(" ", "_")
+    if "DEBRIS" in text or text.endswith("_DEB"):
+        return "DEBRIS"
+    if "ROCKET" in text or "R_B" in text:
+        return "ROCKET_BODY"
+    if "SAT" in text or "PAYLOAD" in text:
+        return "SATELLITE"
+    return "UNKNOWN"
+
+
+def _distance_priority(miss_distance_km):
+    if miss_distance_km <= 1.0:
+        return 98.0
+    if miss_distance_km <= 5.0:
+        return 92.0 - (miss_distance_km - 1.0) * 2.0
+    if miss_distance_km <= 10.0:
+        return 84.0 - (miss_distance_km - 5.0) * 1.4
+    if miss_distance_km <= 25.0:
+        return 72.0 - (miss_distance_km - 10.0) * 0.8
+    if miss_distance_km <= 50.0:
+        return 52.0 - (miss_distance_km - 25.0) * 0.6
+    return 36.0 - (miss_distance_km - 50.0) * 0.36
+
+
+def _classify_screening_priority(
+    score,
+    *,
+    miss_distance_km,
+    has_uncontrolled_object,
+):
+    # Reserve CRITICAL for a sub-kilometre event or a close approach that
+    # involves an object that cannot manoeuvre. This limits alarm inflation.
+    if score >= 90.0 and (miss_distance_km <= 1.0 or has_uncontrolled_object):
+        return "CRITICAL"
+    if score >= 70.0:
+        return "HIGH"
+    if score >= 40.0:
+        return "MEDIUM"
+    return "MONITORED"
+
+
+def score_conjunction_event(
+    *,
+    miss_distance_km,
+    relative_velocity_km_s=None,
+    time_to_closest_approach_hours=0.0,
+    object_a_type="UNKNOWN",
+    object_b_type="UNKNOWN",
+    has_full_state=True,
+):
+    """Return an explainable screening priority for a validated conjunction.
+
+    This deterministic heuristic is not collision probability. Candidate
+    detection and TCA refinement remain the conjunction service's concern.
+    """
+    distance = _require_non_negative_finite(
+        miss_distance_km,
+        field="miss_distance_km",
+    )
+    tca_hours = _require_non_negative_finite(
+        time_to_closest_approach_hours,
+        field="time_to_closest_approach_hours",
+    )
+
+    relative_velocity = None
+    if relative_velocity_km_s is not None:
+        relative_velocity = _require_non_negative_finite(
+            relative_velocity_km_s,
+            field="relative_velocity_km_s",
+        )
+
+    type_a = _normalize_object_type(object_a_type)
+    type_b = _normalize_object_type(object_b_type)
+    has_uncontrolled_object = bool(
+        {type_a, type_b} & UNCONTROLLED_OBJECT_TYPES
+    )
+
+    distance_component = max(0.0, _distance_priority(distance))
+    object_control_adjustment = 5.0 if has_uncontrolled_object else 0.0
+    velocity_adjustment = (
+        min(relative_velocity, 15.0) / 15.0 * 2.0
+        if relative_velocity is not None
+        else 0.0
+    )
+    if tca_hours <= 6.0:
+        tca_adjustment = 2.0
+    elif tca_hours < 24.0:
+        tca_adjustment = (24.0 - tca_hours) / 18.0 * 2.0
+    else:
+        tca_adjustment = 0.0
+
+    confidence_cap = None if has_full_state else 55.0
+    score = min(
+        100.0,
+        distance_component
+        + object_control_adjustment
+        + velocity_adjustment
+        + tca_adjustment,
+    )
+    if confidence_cap is not None:
+        score = min(score, confidence_cap)
+    score = round(max(0.0, score), 1)
+
+    return {
+        "score": score,
+        "level": _classify_screening_priority(
+            score,
+            miss_distance_km=distance,
+            has_uncontrolled_object=has_uncontrolled_object,
+        ),
+        "model_basis": (
+            "linear-relative-motion" if has_full_state else "current-frame-proximity"
+        ),
+        "severity_basis": (
+            "miss-distance-and-object-control-status-heuristic"
+        ),
+        "components": {
+            "miss_distance": round(distance_component, 1),
+            "relative_velocity": round(velocity_adjustment, 1),
+            "tca_urgency": round(tca_adjustment, 1),
+            "object_control": round(object_control_adjustment, 1),
+            "confidence_cap": confidence_cap,
+        },
+    }

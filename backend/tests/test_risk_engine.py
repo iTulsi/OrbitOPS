@@ -13,6 +13,7 @@ from risk_engine import (  # noqa: E402
     haversine_distance_km,
     normalize_collision_object,
     safe_float,
+    score_conjunction_event,
 )
 
 
@@ -132,6 +133,70 @@ class RiskEngineTests(unittest.TestCase):
             {results[0]["object_a"], results[0]["object_b"]},
             {"Satellite A", "Debris B"},
         )
+
+
+    def test_conjunction_score_uses_validated_event_factors(self):
+        baseline = score_conjunction_event(
+            miss_distance_km=8,
+            relative_velocity_km_s=1,
+            time_to_closest_approach_hours=20,
+            object_a_type="SATELLITE",
+            object_b_type="SATELLITE",
+        )
+        urgent_uncontrolled = score_conjunction_event(
+            miss_distance_km=8,
+            relative_velocity_km_s=12,
+            time_to_closest_approach_hours=2,
+            object_a_type="SATELLITE",
+            object_b_type="DEBRIS",
+        )
+
+        self.assertGreater(urgent_uncontrolled["score"], baseline["score"])
+        self.assertGreater(
+            urgent_uncontrolled["components"]["relative_velocity"],
+            baseline["components"]["relative_velocity"],
+        )
+        self.assertGreater(
+            urgent_uncontrolled["components"]["tca_urgency"],
+            baseline["components"]["tca_urgency"],
+        )
+        self.assertEqual(urgent_uncontrolled["components"]["object_control"], 5.0)
+
+    def test_controlled_pair_does_not_inflate_to_critical(self):
+        result = score_conjunction_event(
+            miss_distance_km=2.3,
+            relative_velocity_km_s=7,
+            time_to_closest_approach_hours=2,
+            object_a_type="SATELLITE",
+            object_b_type="SATELLITE",
+        )
+
+        self.assertGreaterEqual(result["score"], 90)
+        self.assertEqual(result["level"], "HIGH")
+
+    def test_limited_state_is_capped_and_explained(self):
+        result = score_conjunction_event(
+            miss_distance_km=0.5,
+            relative_velocity_km_s=None,
+            time_to_closest_approach_hours=0,
+            object_a_type="SATELLITE",
+            object_b_type="DEBRIS",
+            has_full_state=False,
+        )
+
+        self.assertEqual(result["score"], 55.0)
+        self.assertEqual(result["level"], "MEDIUM")
+        self.assertEqual(result["components"]["confidence_cap"], 55.0)
+        self.assertEqual(result["model_basis"], "current-frame-proximity")
+
+    def test_conjunction_score_rejects_invalid_inputs(self):
+        with self.assertRaisesRegex(ValueError, "miss_distance_km"):
+            score_conjunction_event(miss_distance_km=-1)
+        with self.assertRaisesRegex(ValueError, "relative_velocity_km_s"):
+            score_conjunction_event(
+                miss_distance_km=5,
+                relative_velocity_km_s=float("nan"),
+            )
 
 
 if __name__ == "__main__":
