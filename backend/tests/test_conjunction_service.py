@@ -66,6 +66,12 @@ def test_linear_screening_computes_tca_from_source_timestamp():
     assert event["closest_approach_utc"] == "2026-06-19T12:00:10Z"
     assert event["source_position_timestamp"] == "2026-06-19T12:00:00Z"
     assert event["screening_method"] == "constant-velocity-relative-motion"
+    assert event["score_components"]["object_control"] == 5.0
+    assert event["score_components"]["relative_velocity"] > 0
+    assert event["score_components"]["tca_urgency"] == 2.0
+    assert event["severity_basis"] == (
+        "miss-distance-and-object-control-status-heuristic"
+    )
 
 
 def test_limited_state_event_is_capped_and_marked_limited():
@@ -98,6 +104,7 @@ def test_limited_state_event_is_capped_and_marked_limited():
     assert events[0]["confidence"] == "limited"
     assert events[0]["model_basis"] == "current-frame-proximity"
     assert events[0]["risk_score"] <= 55.0
+    assert events[0]["score_components"]["confidence_cap"] == 55.0
 
 
 def test_summary_counts_supported_levels():

@@ -12,6 +12,7 @@ from typing import Any, Callable
 import numpy as np
 
 from conjunction_history import enrich_conjunction_snapshot
+from risk_engine import score_conjunction_event
 from sgp4_conjunction_engine import screen_multi_epoch_sgp4
 
 EARTH_RADIUS_KM = 6371.0088
@@ -172,49 +173,6 @@ def _object_state(obj: dict[str, Any], index: int) -> dict[str, Any] | None:
     }
 
 
-def _risk_from_distance(
-    miss_distance_km: float,
-    object_a_type: str,
-    object_b_type: str,
-    has_full_state: bool,
-) -> tuple[float, str, str]:
-    if miss_distance_km <= 1.0:
-        score = 98.0
-    elif miss_distance_km <= 5.0:
-        score = 92.0 - (miss_distance_km - 1.0) * 2.0
-    elif miss_distance_km <= 10.0:
-        score = 84.0 - (miss_distance_km - 5.0) * 1.4
-    elif miss_distance_km <= 25.0:
-        score = 72.0 - (miss_distance_km - 10.0) * 0.8
-    elif miss_distance_km <= 50.0:
-        score = 52.0 - (miss_distance_km - 25.0) * 0.6
-    else:
-        score = 36.0 - (miss_distance_km - 50.0) * 0.36
-
-    uncontrolled = {object_a_type, object_b_type} & {"DEBRIS", "ROCKET_BODY"}
-    if uncontrolled:
-        score += 5.0
-    if not has_full_state:
-        score = min(score, 55.0)
-
-    score = float(max(0.0, min(100.0, score)))
-    if score >= 90.0:
-        level = "CRITICAL"
-    elif score >= 70.0:
-        level = "HIGH"
-    elif score >= 40.0:
-        level = "MEDIUM"
-    else:
-        level = "MONITORED"
-
-    if has_full_state:
-        basis = "linear-relative-motion"
-    else:
-        basis = "current-frame-proximity"
-
-    return round(score, 1), level, basis
-
-
 def _event_identifier(object_a_id: str, object_b_id: str) -> str:
     # Stable pair identifier that survives telemetry refreshes.
     ordered = sorted((str(object_a_id), str(object_b_id)))
@@ -236,13 +194,17 @@ def _build_event(
     model_basis_override: str | None = None,
     screening_method: str | None = None,
 ) -> dict[str, Any]:
-    score, level, default_model_basis = _risk_from_distance(
-        miss_distance_km,
-        state_a["type"],
-        state_b["type"],
-        has_full_state,
+    score_result = score_conjunction_event(
+        miss_distance_km=miss_distance_km,
+        relative_velocity_km_s=relative_velocity_km_s,
+        time_to_closest_approach_hours=max(0.0, tca_seconds) / 3600.0,
+        object_a_type=state_a["type"],
+        object_b_type=state_b["type"],
+        has_full_state=has_full_state,
     )
-    model_basis = model_basis_override or default_model_basis
+    score = score_result["score"]
+    level = score_result["level"]
+    model_basis = model_basis_override or score_result["model_basis"]
     reference_time = _parse_utc(source_timestamp) or _utc_now()
     closest_approach = reference_time + timedelta(seconds=max(0.0, tca_seconds))
     altitude_values = [
@@ -265,7 +227,8 @@ def _build_event(
         "risk_score": score,
         "screening_priority_level": level,
         "screening_priority_score": score,
-        "severity_basis": "miss-distance-and-object-control-status-heuristic",
+        "severity_basis": score_result["severity_basis"],
+        "score_components": score_result["components"],
         "miss_distance_km": round(float(miss_distance_km), 3),
         "relative_velocity_km_s": (
             round(float(relative_velocity_km_s), 4)
