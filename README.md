@@ -17,17 +17,20 @@ https://orbitops-shjr.onrender.com
 
 > Render free-tier instances may require a short cold start after inactivity.
 
-## Verified production status
+## Verified repository baseline
 
-- 1,511 real orbital objects
-- CelesTrak OMM JSON/GP orbital elements
+The current automated baseline includes:
+
+- Genuine CelesTrak OMM JSON/GP orbital elements
 - Runtime SGP4 propagation
-- Latitude, longitude, altitude, ECI position, and velocity data
-- 38 backend tests passed
-- 6 backend subtests passed
-- Frontend ESLint passed
-- Vite production build passed
-- All public routes returned HTTP 200
+- Latitude, longitude, altitude, ECI position, and velocity output
+- 48 backend tests passing
+- 6 backend parameterized subtests passing
+- Backend compilation checks passing
+- Vite production build passing
+- GitHub Actions backend and frontend jobs passing
+
+Live object counts vary with the available CelesTrak snapshot and configured deployment limits.
 
 ## Features
 
@@ -42,7 +45,7 @@ https://orbitops-shjr.onrender.com
 - AI-assisted mission briefings
 - Mission overview and analytics
 - Alerts and reports
-- Launch intelligence
+- Analytics history accumulated from genuine telemetry snapshots
 - Production health endpoints
 - Genuine orbital-data cache for upstream resilience
 - Docker and Render deployment
@@ -87,15 +90,18 @@ Docker, Render, GitHub Actions, ESLint, and Vite.
 
 ## Application routes
 
-| Route | Purpose |
+| Canonical route | Purpose |
 |---|---|
 | `/` | Landing page |
 | `/overview` | Mission overview |
-| `/visualization` | Interactive orbital globe |
-| `/alerts` | Risk and conjunction alerts |
-| `/reports` | Mission reports and analytics |
-| `/satellites` | Searchable orbital catalogue |
-| `/launches` | Launch intelligence |
+| `/live-tracking` | Interactive orbital globe and live telemetry |
+| `/conjunctions` | Conjunction screening and event details |
+| `/analytics` | Mission analytics and accumulated history |
+| `/object-catalog` | Searchable orbital catalogue |
+| `/reports` | AI-assisted mission briefings and reports |
+
+The legacy routes `/visualization`, `/alerts`, `/satellites`, and `/launches`
+currently redirect to their corresponding canonical pages.
 
 ## API endpoints
 
@@ -130,6 +136,28 @@ Docker, Render, GitHub Actions, ESLint, and Vite.
   "data_mode": "live-propagated"
 }
 ```
+
+## Deployment behavior
+
+The Render/Docker deployment is the authoritative long-running backend runtime.
+It supports background refresh workers, filesystem-backed snapshots, and
+Socket.IO communication.
+
+The repository also contains a Vercel compatibility runtime. That runtime uses
+serverless execution, reduced object and event limits, ephemeral `/tmp` storage,
+disabled background workers, and frontend polling. It is therefore not
+operationally equivalent to the Render deployment.
+
+The planned production-hardening work will converge OrbitOPS on one authoritative
+backend execution model instead of maintaining two divergent implementations.
+
+## Engineering boundaries
+
+- OrbitOPS provides screening-priority heuristics, not physical collision probability.
+- Generated risk scores must not be treated as maneuver recommendations.
+- Gesture controls are documented as planned work and are not currently implemented.
+- Production configuration, secrets, origins, timeouts, and operational limits must
+  move toward validated environment-based configuration rather than embedded defaults.
 
 ## Local development
 
