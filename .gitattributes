@@ -1,7 +1,9 @@
-# Generated Vite production bundles
+# Normalize repository text files across macOS, Linux, and Windows.
+* text=auto eol=lf
+
+# Generated Vite production bundles may contain unavoidable whitespace.
 frontend/dist/** -whitespace
 
-*.json text eol=lf
-*.css text eol=lf
-*.js text eol=lf
-*.jsx text eol=lf
+# Windows command files require CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
