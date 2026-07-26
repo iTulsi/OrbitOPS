@@ -51,6 +51,8 @@ def _load_orbitops_env():
 
 
 _load_orbitops_env()
+
+from config import load_settings
 from conjunction_history import get_history_snapshot
 from conjunction_realtime import build_screening_complete_payload
 from conjunction_service import get_conjunction_snapshot
@@ -105,7 +107,10 @@ FRONTEND_DIST_DIR = os.path.abspath(
 # Config
 # ============================================================
 
-SECRET_KEY = os.environ.get("SECRET_KEY", "orbitops-dev-secret")
+SETTINGS = load_settings()
+
+SECRET_KEY = SETTINGS.secret_key
+CORS_ORIGINS = list(SETTINGS.cors_origins)
 
 UPDATE_INTERVAL_SECONDS = int(os.environ.get("UPDATE_INTERVAL_SECONDS", "30"))
 CACHE_TTL_SECONDS = int(os.environ.get("CACHE_TTL_SECONDS", "20"))
@@ -121,22 +126,6 @@ CONJUNCTION_SOCKET_POLL_SECONDS = max(
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
-CORS_ORIGINS_RAW = (
-    os.environ.get("CORS_ALLOWED_ORIGINS")
-    or os.environ.get("CORS_ORIGINS")
-    or "*"
-)
-
-CORS_ORIGINS = (
-    "*"
-    if CORS_ORIGINS_RAW.strip() == "*"
-    else [
-        origin.strip()
-        for origin in CORS_ORIGINS_RAW.split(",")
-        if origin.strip()
-    ]
-)
-
 
 # ============================================================
 # Flask App
@@ -148,6 +137,7 @@ CORS_ORIGINS = (
 app = Flask(__name__, static_folder=None)
 
 app.config["SECRET_KEY"] = SECRET_KEY
+app.config["ORBITOPS_ENV"] = SETTINGS.environment
 
 CORS(
     app,
