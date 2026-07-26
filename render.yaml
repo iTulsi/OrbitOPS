@@ -6,6 +6,9 @@ services:
     healthCheckPath: /api/health
 
     envVars:
+      - key: ORBITOPS_ENV
+        value: production
+
       - key: WEB_CONCURRENCY
         value: "1"
 
