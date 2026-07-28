@@ -35,8 +35,4 @@ export const orbitApi = {
   risk: () => request("/api/risk"),
   highRisk: () => request("/api/high-risk"),
   aiBriefing: () => request("/api/ai/briefing"),
-  forceFetch: () =>
-    request("/api/force_fetch", {
-      method: "POST",
-    }),
 };

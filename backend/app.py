@@ -943,24 +943,6 @@ def search_objects():
         return error_response(str(error))
 
 
-@app.route("/api/force_fetch", methods=["POST", "GET"])
-def force_fetch():
-    try:
-        data = update_orbit_data(force=True)
-
-        return success_response({
-            "source": data.get("source"),
-            "objects": len(data.get("objects", [])),
-            "high_risk_objects": len(data.get("high_risk_objects", [])),
-            "risk_level": data.get("stats", {}).get("risk_level"),
-            "last_updated": data.get("last_updated"),
-        })
-
-    except Exception as error:
-        logger.exception("Force fetch failed")
-        return error_response(str(error))
-
-
 # ============================================================
 # AI Mission Briefing — grounded in real OrbitOPS snapshots
 # ============================================================
@@ -1587,7 +1569,6 @@ def serve_frontend(path: str):
             "/api/stats",
             "/api/search?q=ISS",
             "/api/ai/briefing",
-            "/api/force_fetch",
         ],
     }), 200
 
