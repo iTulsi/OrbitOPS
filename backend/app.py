@@ -186,9 +186,15 @@ def error_response(
     status_code: int = 500,
     status: str = "error",
 ):
+    public_message = (
+        "Internal server error"
+        if 500 <= status_code <= 599
+        else message
+    )
+
     return jsonify({
         "status": status,
-        "message": message,
+        "message": public_message,
     }), status_code
 
 
