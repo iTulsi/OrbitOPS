@@ -116,6 +116,32 @@ def test_objects_endpoint_honors_limit(client, mock_orbit_data):
     assert payload["objects"][0]["name"] == "ISS"
 
 
+def test_objects_endpoint_hides_internal_error_details(
+    client,
+    monkeypatch,
+):
+    internal_message = "sensitive database connection details"
+
+    def fail_update(force=False):
+        raise RuntimeError(internal_message)
+
+    monkeypatch.setattr(
+        orbit_app,
+        "update_orbit_data",
+        fail_update,
+    )
+
+    response = client.get("/api/objects")
+    payload = response.get_json()
+
+    assert response.status_code == 500
+    assert payload == {
+        "status": "error",
+        "message": "Internal server error",
+    }
+    assert internal_message not in response.get_data(as_text=True)
+
+
 def test_single_object_endpoint_handles_found_and_missing_objects(
     client,
     mock_orbit_data,
