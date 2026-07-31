@@ -241,6 +241,74 @@ def test_collision_risk_endpoint_uses_conjunction_snapshot(
 
 
 
+@pytest.mark.parametrize(
+    (
+        "endpoint",
+        "dependency",
+        "expected_status_code",
+        "expected_fields",
+    ),
+    [
+        (
+            "/api/satellites/live",
+            "get_orbital_data",
+            500,
+            {"status": "error"},
+        ),
+        (
+            "/api/data-status",
+            "get_orbital_data",
+            503,
+            {
+                "status": "offline",
+                "source": "CelesTrak",
+            },
+        ),
+        (
+            "/api/collision-risk",
+            "get_conjunction_snapshot",
+            500,
+            {
+                "status": "error",
+                "events": [],
+                "risk_pairs": [],
+                "deprecated": True,
+                "replacement_endpoint": "/api/conjunctions",
+            },
+        ),
+    ],
+)
+def test_direct_server_error_responses_hide_internal_details(
+    client,
+    monkeypatch,
+    endpoint,
+    dependency,
+    expected_status_code,
+    expected_fields,
+):
+    internal_message = "sensitive upstream connection details"
+
+    def fail_dependency(*args, **kwargs):
+        raise RuntimeError(internal_message)
+
+    monkeypatch.setattr(
+        orbit_app,
+        dependency,
+        fail_dependency,
+    )
+
+    response = client.get(endpoint)
+    payload = response.get_json()
+
+    assert response.status_code == expected_status_code
+    assert payload["message"] == "Internal server error"
+
+    for field, expected_value in expected_fields.items():
+        assert payload[field] == expected_value
+
+    assert internal_message not in response.get_data(as_text=True)
+
+
 def test_ai_briefing_reports_unavailable_without_key_or_cache(
     client,
     mock_orbit_data,

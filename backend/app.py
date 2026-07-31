@@ -756,10 +756,11 @@ def get_live_satellites():
             "data_mode": result.get("data_mode", "live-propagated")
         })
 
-    except Exception as error:
+    except Exception:
+        logger.exception("Failed to fetch live satellites")
         return jsonify({
             "status": "error",
-            "message": str(error)
+            "message": "Internal server error"
         }), 500
 
 
@@ -793,11 +794,12 @@ def get_data_status():
             "data_mode": result.get("data_mode", "live-propagated")
         })
 
-    except Exception as error:
+    except Exception:
+        logger.exception("Failed to fetch data status")
         return jsonify({
             "status": "offline",
             "source": "CelesTrak",
-            "message": str(error)
+            "message": "Internal server error"
         }), 503
 
 
@@ -889,11 +891,11 @@ def get_collision_risk():
 
         return jsonify(response), status_code
 
-    except Exception as error:
+    except Exception:
         logger.exception("Failed to fetch collision-risk compatibility response")
         return jsonify({
             "status": "error",
-            "message": str(error),
+            "message": "Internal server error",
             "events": [],
             "risk_pairs": [],
             "deprecated": True,
