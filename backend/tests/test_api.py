@@ -116,6 +116,59 @@ def test_objects_endpoint_honors_limit(client, mock_orbit_data):
     assert payload["objects"][0]["name"] == "ISS"
 
 
+@pytest.mark.parametrize(
+    ("endpoint", "query", "expected_count"),
+    [
+        ("/api/objects", "", 100),
+        ("/api/objects", "?limit=0", 100),
+        ("/api/objects", "?limit=-1", 100),
+        ("/api/objects", "?limit=1", 1),
+        ("/api/objects", "?limit=500", 100),
+        ("/api/objects", "?limit=invalid", 100),
+        ("/api/debris", "", 100),
+        ("/api/debris", "?limit=0", 100),
+        ("/api/debris", "?limit=-1", 100),
+        ("/api/debris", "?limit=1", 1),
+        ("/api/debris", "?limit=500", 100),
+        ("/api/debris", "?limit=invalid", 100),
+    ],
+)
+def test_collection_endpoints_enforce_result_limits(
+    client,
+    monkeypatch,
+    endpoint,
+    query,
+    expected_count,
+):
+    objects = [
+        {
+            "id": str(index),
+            "name": f"Object {index}",
+            "type": "DEBRIS",
+        }
+        for index in range(150)
+    ]
+
+    monkeypatch.setattr(
+        orbit_app,
+        "update_orbit_data",
+        lambda force=False: {
+            "objects": objects,
+            "high_risk_objects": [],
+            "stats": {},
+            "source": "unit-test",
+            "last_updated": None,
+        },
+    )
+
+    response = client.get(f"{endpoint}{query}")
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    assert len(payload["objects"]) == expected_count
+    assert payload["total_objects"] == 150
+
+
 def test_objects_endpoint_hides_internal_error_details(
     client,
     monkeypatch,
