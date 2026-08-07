@@ -668,7 +668,7 @@ def get_debris():
 
         object_type = request.args.get("type", "").strip().upper()
         risk_level = request.args.get("risk", "").strip().upper()
-        limit = request.args.get("limit", type=int)
+        limit = parse_limit(default=100, maximum=100)
 
         objects = data.get("objects", [])
 
@@ -686,8 +686,7 @@ def get_debris():
                 if obj.get("risk_level") == risk_level
             ]
 
-        if limit is not None and limit > 0:
-            objects = objects[:min(limit, 100)]
+        objects = objects[:limit]
 
         return success_response({
             "objects": objects,
@@ -707,12 +706,11 @@ def get_debris():
 def get_objects():
     try:
         data = update_orbit_data()
-        limit = request.args.get("limit", type=int)
+        limit = parse_limit(default=100, maximum=100)
 
         objects = data.get("objects", [])
 
-        if limit is not None and limit > 0:
-            objects = objects[:min(limit, 100)]
+        objects = objects[:limit]
 
         return success_response({
             "objects": objects,
