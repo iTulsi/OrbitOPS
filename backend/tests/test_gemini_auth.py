@@ -29,6 +29,11 @@ class FakeGeminiResponse:
 def test_ai_briefing_uses_header_authentication(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "test-secret-key")
     monkeypatch.setenv("GEMINI_MODEL", "gemini-2.5-flash")
+    monkeypatch.setattr(
+        orbit_app,
+        "start_background_worker_once",
+        lambda: None,
+    )
 
     monkeypatch.setattr(
         orbit_app,
