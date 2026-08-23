@@ -105,6 +105,30 @@ def test_health_endpoint_returns_system_status(client, monkeypatch):
     assert payload["source"] == "unit-test"
 
 
+def test_health_endpoint_reports_degraded_status(client, monkeypatch):
+    degraded_data = {
+        **SAMPLE_DATA,
+        "status": "degraded",
+        "last_error": "upstream refresh failed",
+    }
+    monkeypatch.setattr(
+        orbit_app,
+        "get_cached_orbit_data",
+        lambda: degraded_data,
+    )
+
+    response = client.get("/api/health")
+    payload = response.get_json()
+
+    assert response.status_code == 503
+    assert payload["status"] == "degraded"
+    assert payload["backend_status"] == "degraded"
+    assert payload["system"] == "OrbitOPS"
+    assert payload["objects"] == 2
+    assert payload["source"] == "unit-test"
+    assert "last_error" not in payload
+
+
 def test_objects_endpoint_honors_limit(client, mock_orbit_data):
     response = client.get("/api/objects?limit=1")
     payload = response.get_json()
