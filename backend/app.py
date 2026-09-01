@@ -648,17 +648,26 @@ def start_worker_before_first_request():
 @app.route("/api/health", methods=["GET"])
 def health_check():
     data = get_cached_orbit_data()
+    backend_status = data.get("status")
 
-    return success_response({
+    payload = {
         "system": "OrbitOPS",
-        "backend_status": data.get("status"),
+        "backend_status": backend_status,
         "source": data.get("source"),
         "objects": len(data.get("objects", [])),
         "last_updated": data.get("last_updated"),
         "frontend_built": os.path.exists(
             os.path.join(FRONTEND_DIST_DIR, "index.html")
         ),
-    })
+    }
+
+    if backend_status == "degraded":
+        return jsonify({
+            "status": "degraded",
+            **payload,
+        }), 503
+
+    return success_response(payload)
 
 
 @app.route("/api/debris", methods=["GET"])
