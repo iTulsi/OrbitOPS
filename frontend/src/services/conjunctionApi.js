@@ -66,7 +66,7 @@ export async function fetchConjunctions({ refresh = false, limit = 500, signal }
     });
     return requestJson(`/api/conjunctions?${params.toString()}`, {
         signal,
-        timeoutMs: refresh ? 12000 : 9000,
+        timeoutMs: 30000,
     });
 }
 
